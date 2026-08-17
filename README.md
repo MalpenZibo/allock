@@ -183,10 +183,6 @@ how much tint covers the blur.
 - **The password is not scrubbed from memory.** It lives in a `String` that
   reallocates as you type, and PAM copies it again. Doing this properly needs
   a zeroing buffer down in guido's input handling.
-- **The clock's shadow is capped at a small blur.** Past roughly 8 logical
-  pixels guido draws it as a mosaic of rectangles rather than a halo — it
-  reproduces in guido's own `text_decoration_example`, so the fix belongs
-  there.
 
 ## Licence
 

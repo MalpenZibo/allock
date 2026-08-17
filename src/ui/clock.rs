@@ -14,7 +14,7 @@ use super::Screen;
 /// legibility crutch.
 const SHADOW: TextShadow = TextShadow {
     offset: (0.0, 2.0),
-    blur: 6.0,
+    blur: 10.0,
     color: Color::rgba(0.0, 0.0, 0.0, 0.6),
 };
 
