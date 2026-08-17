@@ -141,6 +141,10 @@ User (GECOS name, `~/.face` avatar if present), clock and date, the password
 field with the backend's own prompt, why the last attempt failed, the
 fingerprint hint, and the battery. In greeter mode, a session picker.
 
+A ⇪ appears inside the field while caps lock is on. It comes from the latched
+modifier state rather than from a key event, so it is already there when the
+screen appears with caps lock on — not one keystroke later.
+
 ## Notes on the internals
 
 `src/services/` and `src/components/icons.rs` are copied verbatim from the
@@ -176,9 +180,6 @@ how much tint covers the blur.
 
 ### Known limitations
 
-- **No caps-lock indicator.** guido's `Modifiers` exposes ctrl/alt/shift/logo
-  but not the lock group, so there is nothing to read. A one-field addition
-  to guido would enable it.
 - **The password is not scrubbed from memory.** It lives in a `String` that
   reallocates as you type, and PAM copies it again. Doing this properly needs
   a zeroing buffer down in guido's input handling.

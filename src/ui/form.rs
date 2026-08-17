@@ -16,6 +16,8 @@ const FINGERPRINT_GLYPH: &str = "\u{f0237}";
 const SUBMIT_GLYPH: &str = "\u{f0057}";
 /// nf-md-account
 const ACCOUNT_GLYPH: &str = "\u{f0004}";
+/// nf-md-apple_keyboard_caps — the ⇪ every other password field uses.
+const CAPS_LOCK_GLYPH: &str = "\u{f0632}";
 
 /// Exact, not a minimum: under the centring column a minimum width grows to
 /// fill the output, and the card grows with it into a full-width band.
@@ -164,6 +166,18 @@ fn field(screen: &Screen) -> Container {
                         )
                         .child(caret(theme, state.input)),
                 )
+                // Inside the field, where every other password field puts it:
+                // the warning is about what this box is receiving. Read from the
+                // latched state rather than a key event, so it is already there
+                // when the screen appears with caps lock on.
+                .child(move || {
+                    keyboard_modifiers().get().caps_lock.then(|| {
+                        icon()
+                            .kind(IconKind::from(CAPS_LOCK_GLYPH))
+                            .font_size(16.0)
+                            .color(theme.warning)
+                    })
+                })
                 .child(
                     icon()
                         .kind(IconKind::from(SUBMIT_GLYPH))
