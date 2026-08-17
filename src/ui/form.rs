@@ -6,7 +6,7 @@ use guido::prelude::*;
 use super::Screen;
 use crate::auth::{FingerprintState, NoticeLevel};
 use crate::components::icons::{IconKind, icon};
-use crate::theme::{ThemeColors, with_alpha};
+use crate::theme::with_alpha;
 
 // Codepoints verified against SymbolsNerdFont-Regular's cmap, not guessed:
 // the neighbourhood is dense and wrong-but-present glyphs render silently.
@@ -91,13 +91,24 @@ fn name(screen: &Screen) -> Container {
 
 /// The input field.
 ///
-/// There is no `text_input` here on purpose — see [`super::attach_keys`]. The
-/// buffer is rendered as dots for a secret prompt and verbatim for a visible
-/// one (the greeter's username step), with a static caret at the end.
+/// A real `text_input`, which is what gives it click-to-position, selection and
+/// the whole editing vocabulary. What it deliberately does not get is a caret:
+/// on a masked field every character looks the same and the position is always
+/// the end, so the caret says nothing and costs the only repaint a still lock
+/// screen would otherwise make, twice a second, all night.
+///
+/// It takes the keyboard by itself (`autofocus`), which is why there is nothing
+/// to click before typing — see [`super::attach_keys`] for the keys the field
+/// does not want.
 fn field(screen: &Screen) -> Container {
     let theme = screen.theme;
     let auth = screen.auth;
     let state = auth.state;
+
+    // The mask follows the prompt: greetd asks for a user name in the clear, PAM
+    // for a password. A memo, so the field is rebuilt when the answer flips
+    // rather than on every prompt — `password()` takes a bool, not a signal.
+    let secret = create_memo(move || is_secret(&state.prompt.get()));
 
     container()
         .width(FIELD_WIDTH)
@@ -130,41 +141,21 @@ fn field(screen: &Screen) -> Container {
                 .child(
                     container()
                         .width(fill())
-                        .layout(
-                            Flex::row()
-                                .spacing(2.0)
-                                .cross_alignment(CrossAlignment::Center),
-                        )
-                        .child(
-                            container()
-                                .font_size(16.0)
-                                // Dimmed while the placeholder shows.
-                                .text_color(move || {
-                                    if state.input.get().is_empty() {
-                                        with_alpha(theme.text, 0.4)
-                                    } else {
-                                        theme.text
-                                    }
-                                })
-                                .child(
-                                    text(move || {
-                                        let buffer = state.input.get();
-                                        if buffer.is_empty() {
-                                            return placeholder(&state.prompt.get());
-                                        }
-                                        if is_secret(&state.prompt.get()) {
-                                            // Count graphemes, not bytes: one
-                                            // accented character must not show
-                                            // as two dots.
-                                            "\u{2022}".repeat(buffer.chars().count())
-                                        } else {
-                                            buffer
-                                        }
-                                    })
-                                    .nowrap(),
-                                ),
-                        )
-                        .child(caret(theme, state.input)),
+                        .font_size(16.0)
+                        .text_color(theme.text)
+                        .placeholder_color(with_alpha(theme.text, 0.4))
+                        // Rebuilt when the mask flips. The old input leaving the
+                        // tree drops the focus, which the new one's `autofocus`
+                        // then takes — so the greeter's username step becomes the
+                        // password step without a click.
+                        .child(move || {
+                            text_input(state.input)
+                                .password(secret.get())
+                                .placeholder(move || prompt_label(&state.prompt.get()))
+                                .no_caret()
+                                .autofocus()
+                                .on_submit(move |_| auth.submit())
+                        }),
                 )
                 // Inside the field, where every other password field puts it:
                 // the warning is about what this box is receiving. Read from the
@@ -178,35 +169,38 @@ fn field(screen: &Screen) -> Container {
                             .color(theme.warning)
                     })
                 })
-                .child(
-                    icon()
-                        .kind(IconKind::from(SUBMIT_GLYPH))
-                        .font_size(18.0)
-                        .color(move || {
-                            if state.busy.get() || state.input.get().is_empty() {
-                                with_alpha(theme.text, 0.25)
-                            } else {
-                                theme.primary
-                            }
-                        }),
-                ),
+                .child(submit(screen)),
         )
-        .on_click(move || auth.submit())
 }
 
-fn caret(theme: ThemeColors, input: RwSignal<String>) -> Container {
+/// The submit affordance.
+///
+/// The click lives here and not on the whole field, which is what it used to do:
+/// clicking a text field means "put the cursor here", and on the old hand-rolled
+/// field it meant "send what you have to PAM" — an empty password on a stray
+/// click, which `pam_faillock` counts like any other failed attempt.
+fn submit(screen: &Screen) -> Container {
+    let theme = screen.theme;
+    let auth = screen.auth;
+    let state = auth.state;
+
     container()
-        .width(2.0)
-        .height(20.0)
-        .corner_radius(1.0)
-        .background(move || {
-            // Hidden while the placeholder shows, so the two do not collide.
-            if input.get().is_empty() {
-                Color::TRANSPARENT
-            } else {
-                theme.primary
-            }
-        })
+        // The glyph is 18px; the padding is what makes it worth aiming at.
+        .padding(4.0)
+        .corner_radius(10.0)
+        .on_click(move || auth.submit())
+        .child(
+            icon()
+                .kind(IconKind::from(SUBMIT_GLYPH))
+                .font_size(18.0)
+                .color(move || {
+                    if state.busy.get() || state.input.get().is_empty() {
+                        with_alpha(theme.text, 0.25)
+                    } else {
+                        theme.primary
+                    }
+                }),
+        )
 }
 
 fn notice(screen: &Screen) -> Container {
@@ -277,7 +271,7 @@ fn is_secret(prompt: &Option<crate::auth::Prompt>) -> bool {
     prompt.as_ref().map(|prompt| prompt.secret).unwrap_or(true)
 }
 
-fn placeholder(prompt: &Option<crate::auth::Prompt>) -> String {
+fn prompt_label(prompt: &Option<crate::auth::Prompt>) -> String {
     match prompt {
         // PAM sends "Password: " with the colon and padding; the field has a
         // label's job here, not a terminal prompt's.

@@ -90,10 +90,16 @@ pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
     attach_keys(root, screen)
 }
 
-/// The lock screen owns key handling at the root instead of using a focused
-/// text field: typing has to work the instant the screen appears, with no
-/// click to focus and no visible pointer. It also keeps the clipboard out of
-/// the password path, which is the behaviour a lock screen wants anyway.
+/// The two keys the field does not want.
+///
+/// Everything about editing — characters, backspace, selection, Enter — belongs
+/// to the `text_input`, which has the focus and answers first; what reaches here
+/// is what it declined. These two are screen-level verbs rather than editing:
+///
+/// Escape clears what was typed, and pressing it again on an already empty field
+/// restarts the conversation — the only way out of a PAM stage waiting on
+/// something other than the keyboard. Ctrl+U is the readline habit for "clear the
+/// line", which the input has no binding for.
 fn attach_keys(root: Container, screen: Screen) -> Container {
     let auth = screen.auth;
     root.on_key_down(move |key, modifiers| {
@@ -101,11 +107,6 @@ fn attach_keys(root: Container, screen: Screen) -> Container {
             return;
         }
         match key {
-            Key::Enter => auth.submit(),
-            // Escape clears what was typed; pressing it again on an already
-            // empty field restarts the conversation, which is the only way
-            // out of a PAM stage that is waiting on something other than the
-            // keyboard.
             Key::Escape => {
                 if auth.state.input.get_untracked().is_empty() {
                     auth.restart();
@@ -113,20 +114,7 @@ fn attach_keys(root: Container, screen: Screen) -> Container {
                     auth.state.input.set(String::new());
                 }
             }
-            // Ctrl+U: the readline habit for "clear the line".
             Key::Char('u') if modifiers.ctrl => auth.state.input.set(String::new()),
-            Key::Backspace => auth.state.input.update(|buffer| {
-                buffer.pop();
-            }),
-            // Modified characters are shortcuts, not input.
-            Key::Char(c)
-                if !modifiers.ctrl
-                    && !modifiers.alt
-                    && !modifiers.logo
-                    && !auth.state.busy.get_untracked() =>
-            {
-                auth.state.input.update(|buffer| buffer.push(c));
-            }
             _ => {}
         }
     })

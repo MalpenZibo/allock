@@ -151,6 +151,12 @@ impl Auth {
             return;
         }
         let answer = self.state.input.get_untracked();
+        // An empty answer is never a real attempt, and attempts are counted:
+        // pam_faillock locks the account after a handful. Enter on an empty field
+        // used to spend one.
+        if answer.is_empty() {
+            return;
+        }
         let visible = self
             .state
             .prompt

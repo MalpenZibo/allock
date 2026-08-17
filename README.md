@@ -87,10 +87,20 @@ screen by locking the session you are working in is how you end up at a TTY,
 because a lock client that dies while holding the lock leaves the compositor
 locked with nobody to unlock it. The protocol guarantees that on purpose.
 
-The password field takes keystrokes the instant the screen appears — there is
-no field to click and no cursor to find. `Esc` clears what you typed; pressing
-it on an empty field restarts the PAM conversation, which is the way out of a
-stack stuck waiting on something other than the keyboard.
+The password field takes keystrokes the instant the screen appears — it asks for
+the keyboard itself, so there is nothing to click first and no cursor to find on
+a surface with no pointer. `Esc` clears what you typed; pressing it on an empty
+field restarts the PAM conversation, which is the way out of a stack stuck
+waiting on something other than the keyboard.
+
+It draws no caret. On a masked field every character looks the same and you are
+always at the end, so the caret says nothing — and it would be the one thing a
+still lock screen redraws on its own, twice a second, all night.
+
+Pasting *into* the field works; nothing can copy out of it. Blocking paste is
+what banking sites are mocked for — it stops password managers, not attackers —
+while copy, cut and the primary selection are refused, because a lock screen is
+exactly where a password must not end up in a buffer that outlives the unlock.
 
 ### Fingerprint
 
@@ -180,9 +190,10 @@ how much tint covers the blur.
 
 ### Known limitations
 
-- **The password is not scrubbed from memory.** It lives in a `String` that
-  reallocates as you type, and PAM copies it again. Doing this properly needs
-  a zeroing buffer down in guido's input handling.
+- **The password is not scrubbed from memory.** It lives in a `String` — guido's
+  text input, and the signal behind it — that reallocates as you type, and PAM
+  copies it again. Doing this properly needs a zeroing buffer down in guido's
+  input handling.
 
 ## Licence
 
