@@ -235,7 +235,7 @@ pub struct SessionDef {
     pub env: Vec<String>,
 }
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct GreeterConfig {
     /// Preselected user name. Empty means the form asks for it first.
@@ -244,6 +244,20 @@ pub struct GreeterConfig {
     /// `wayland-sessions` / `xsessions` directories.
     #[serde(rename = "session")]
     pub sessions: Vec<SessionDef>,
+    /// Preselect the last user and session that signed in successfully. Off
+    /// leaves nothing on disk to read *or* to write — on a shared machine the
+    /// last user name is a hint about who uses it.
+    pub remember: bool,
+}
+
+impl Default for GreeterConfig {
+    fn default() -> Self {
+        Self {
+            user: None,
+            sessions: Vec::new(),
+            remember: true,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

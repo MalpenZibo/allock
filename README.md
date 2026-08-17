@@ -123,6 +123,18 @@ greetd runs the PAM stack itself, so the greeter always requires the password:
 a fingerprint match would prove identity without producing a session greetd
 would accept.
 
+### What it remembers
+
+After a successful login the greeter notes the account and the session in
+`$XDG_CACHE_HOME/allock/last-login.toml` (the `greeter` user's own cache, since
+that is who it runs as) and starts there next time. Both are suggestions: the
+session is preselected in a picker that still cycles, and the name is *typed
+into the field* rather than handed to greetd, so anybody else can clear it and
+sign in — a greeter must not be able to remember its way into locking an
+account out. The session is stored by name, so installing a new one does not
+shift the choice. `[greeter] remember = false` leaves nothing on disk to read
+or to write.
+
 ## What it shows
 
 User (GECOS name, `~/.face` avatar if present), clock and date, the password
@@ -170,7 +182,10 @@ how much tint covers the blur.
 - **The password is not scrubbed from memory.** It lives in a `String` that
   reallocates as you type, and PAM copies it again. Doing this properly needs
   a zeroing buffer down in guido's input handling.
-- The greeter does not remember the last user or session between boots.
+- **The clock's shadow is capped at a small blur.** Past roughly 8 logical
+  pixels guido draws it as a mosaic of rectangles rather than a halo — it
+  reproduces in guido's own `text_decoration_example`, so the fix belongs
+  there.
 
 ## Licence
 

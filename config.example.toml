@@ -59,6 +59,13 @@ battery = true
 # Preselected account. Omit or leave empty to have the form ask for it first.
 # user = "zibo"
 
+# Start on the last account and session that signed in successfully, kept in
+# $XDG_CACHE_HOME/allock/last-login.toml. The name is typed into the field for
+# you, so somebody else can still clear it and sign in. Off leaves nothing on
+# disk to read or to write — on a shared machine the last user name is a hint
+# about who uses it.
+remember = true
+
 # Sessions offered by the picker. With none listed, allock scans
 # /usr/share/wayland-sessions and /usr/share/xsessions.
 # [[greeter.session]]

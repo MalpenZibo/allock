@@ -15,6 +15,7 @@
 mod auth;
 mod components;
 mod config;
+mod last_login;
 mod services;
 mod theme;
 mod ui;
@@ -290,6 +291,18 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         .clone()
         .filter(|name| !name.trim().is_empty());
 
+    let remembered = if config.greeter.remember {
+        last_login::load()
+    } else {
+        last_login::LastLogin::default()
+    };
+    // Only meaningful when the form is the one asking: with `[greeter] user`
+    // set, the first prompt is already the password.
+    let remembered_user = configured_user
+        .is_none()
+        .then(|| remembered.user.clone())
+        .flatten();
+
     // greetd runs the PAM stack itself, so there is no second credential to
     // check locally — fingerprint verification would prove identity without
     // producing a session greetd would accept.
@@ -304,13 +317,36 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         theme,
         auth,
         mode: Mode::Greeter,
-        user: create_signal(configured_user.as_deref().and_then(user::by_name)),
+        user: create_signal(
+            configured_user
+                .as_deref()
+                .or(remembered_user.as_deref())
+                .and_then(user::by_name),
+        ),
         battery: battery_service(&config),
         sessions: sessions.clone(),
-        session_index: create_signal(0),
+        session_index: create_signal(remembered.session_index(&sessions)),
         now: ui::clock::create(),
         config: config.clone(),
     };
+
+    // The remembered name is typed into the field, not handed to greetd: the
+    // username step stays, so the greeter can never remember its way into
+    // refusing to let somebody else log in. It waits for the prompt to arrive
+    // because until then the field masks what it holds — a name shown as dots
+    // reads as a password somebody else typed.
+    if let Some(name) = remembered_user.clone() {
+        let state = auth.state;
+        let filled = create_signal(false);
+        create_effect(move || {
+            let asking_in_the_clear = state.prompt.get().is_some_and(|prompt| !prompt.secret);
+            if asking_in_the_clear && !filled.get_untracked() {
+                filled.set(true);
+                state.input.set(name.clone());
+            }
+        })
+        .detach();
+    }
 
     // The username step answers a visible prompt; showing who is signing in
     // is the only reason we keep it.
@@ -325,6 +361,7 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
     // Authenticated: hand greetd the session to launch. greetd replaces the
     // greeter with it, so there is nothing to do afterwards.
     let session_index = screen.session_index;
+    let remember = config.greeter.remember;
     create_effect(move || {
         if !auth.state.authenticated.get() {
             return;
@@ -336,6 +373,14 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         // The picker wraps already; the modulo guards a list that shrank.
         let session = &sessions[session_index.get_untracked() % sessions.len()];
         log::info!("starting session {}", session.name);
+        if remember {
+            // Before the request, not after: greetd replaces this process with
+            // the session, and a write racing that loses.
+            let user = configured_user
+                .clone()
+                .or_else(|| auth.state.visible_answer.get_untracked());
+            last_login::save(user.as_deref(), &session.name);
+        }
         auth.start_session(session.command.clone(), session.env.clone());
     })
     .detach();
