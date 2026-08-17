@@ -1,0 +1,47 @@
+[package]
+name = "allock"
+description = "A lock screen and greetd greeter that follows ashell's look"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+authors = ["Simone Camito (Zibo)"]
+
+[[bin]]
+name = "allock"
+path = "src/main.rs"
+
+[dependencies]
+guido = { path = "../guido" }
+
+# UI / runtime
+chrono = { version = "0.4", default-features = false, features = ["clock", "unstable-locales"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync", "io-util", "process"] }
+futures = "0.3"
+pin-project-lite = "0.2"
+# Only used by the copied ashell service shim's image handle type.
+bytes = "1"
+
+# Config
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+hex_color = { version = "3", features = ["serde"] }
+
+# Auth
+# MPL-2.0; keeps the unsafe libpam FFI out of the authentication path.
+pam-client2 = { version = "0.5", default-features = false }
+# GPL-3.0-only, from the greetd author. Compatible with this crate's licence.
+greetd_ipc = { version = "0.10", features = ["tokio-codec"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+uzers = { version = "0.12", default-features = false }
+libc = "0.2"
+
+# Plumbing
+clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+lto = "thin"
+strip = true
+opt-level = 3

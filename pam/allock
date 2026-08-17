@@ -1,0 +1,27 @@
+#%PAM-1.0
+# PAM policy for allock's lock screen. Install as /etc/pam.d/allock.
+#
+# Without a policy of its own, PAM falls back to /etc/pam.d/other, which on
+# essentially every distribution denies everything — allock would lock and
+# then reject every password. allock refuses to lock in that case rather than
+# shut you out, and falls back to system-auth when it can (see auth/pam.rs).
+#
+# `include system-auth` rather than `include login`, which is what hyprlock
+# and swaylock use. Their chain (login -> system-local-login -> system-login
+# -> system-auth) drags in pam_shells and pam_nologin: an /etc/nologin file,
+# or a shell missing from /etc/shells, then makes the screen impossible to
+# unlock. Those are login-on-a-tty checks; a lock screen is re-proving the
+# identity of a session that is already running, so it has no business
+# enforcing whether that session should have been allowed to start.
+#
+# What is left is the part that matters: pam_unix for the password (reaching
+# /etc/shadow through the setuid unix_chkpwd helper, which is what lets an
+# unprivileged allock verify it) and pam_faillock to rate-limit guessing.
+#
+# On Debian and derivatives, replace system-auth with common-auth.
+auth       include      system-auth
+
+# allock never opens a session or changes a password — it only proves the
+# user is who they say they are. account is included so an expired or locked
+# account is still refused.
+account    include      system-auth
