@@ -62,7 +62,7 @@ pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
                 .main_alignment(MainAlignment::Center)
                 .cross_alignment(CrossAlignment::Center),
         )
-        .child(clock::view(screen.now, &screen.config.clock, theme))
+        .child(clock::view(&screen))
         .maybe_child(shows_form.then(|| form::view(screen.clone())));
 
     let bottom = container()

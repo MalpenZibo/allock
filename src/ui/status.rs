@@ -64,10 +64,13 @@ fn battery(screen: &Screen) -> Container {
                 .child(
                     container()
                         .padding([10.0, 18.0])
+                        // Baseline, not Center: the glyph and the reading are
+                        // different sizes, and lining their boxes up leaves
+                        // them floating at unrelated heights.
                         .layout(
                             Flex::row()
                                 .spacing(10.0)
-                                .cross_alignment(CrossAlignment::Center),
+                                .cross_alignment(CrossAlignment::Baseline),
                         )
                         .child(icon().kind(battery_icon).font_size(24.0).color(color))
                         .child(
@@ -109,7 +112,7 @@ fn session_picker(screen: &Screen) -> Container {
                 .layout(
                     Flex::row()
                         .spacing(8.0)
-                        .cross_alignment(CrossAlignment::Center),
+                        .cross_alignment(CrossAlignment::Baseline),
                 )
                 .child(
                     icon()

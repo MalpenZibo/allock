@@ -244,7 +244,7 @@ fn fingerprint_hint(screen: &Screen) -> Container {
                 .layout(
                     Flex::row()
                         .spacing(7.0)
-                        .cross_alignment(CrossAlignment::Center),
+                        .cross_alignment(CrossAlignment::Baseline),
                 )
                 .child(
                     icon()

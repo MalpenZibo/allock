@@ -5,8 +5,18 @@ use std::time::Duration;
 use chrono::{DateTime, Local, Timelike};
 use guido::prelude::*;
 
-use crate::config::ClockConfig;
-use crate::theme::ThemeColors;
+use super::Screen;
+
+/// Over a photograph no single text colour works: the picture is light in some
+/// places and dark in others. Darkening the neighbourhood each glyph sits in
+/// separates the clock from whatever is behind it without tinting the
+/// wallpaper further — `[background] dim` is the user's choice, not a
+/// legibility crutch.
+const SHADOW: TextShadow = TextShadow {
+    offset: (0.0, 2.0),
+    blur: 6.0,
+    color: Color::rgba(0.0, 0.0, 0.0, 0.6),
+};
 
 /// A signal holding the current local time.
 ///
@@ -31,9 +41,11 @@ pub fn create() -> Signal<DateTime<Local>> {
     now.read_only()
 }
 
-pub fn view(now: Signal<DateTime<Local>>, config: &ClockConfig, theme: ThemeColors) -> Container {
-    let time_format = config.time_format.clone();
-    let date_format = config.date_format.clone();
+pub fn view(screen: &Screen) -> Container {
+    let now = screen.now;
+    let theme = screen.theme;
+    let time_format = screen.config.clock.time_format.clone();
+    let date_format = screen.config.clock.date_format.clone();
 
     let time = create_memo(move || now.get().format(&time_format).to_string());
     let date = create_memo(move || {
@@ -48,7 +60,7 @@ pub fn view(now: Signal<DateTime<Local>>, config: &ClockConfig, theme: ThemeColo
         }
     });
 
-    container()
+    let clock = container()
         .layout(
             Flex::column()
                 .spacing(2.0)
@@ -69,5 +81,13 @@ pub fn view(now: Signal<DateTime<Local>>, config: &ClockConfig, theme: ThemeColo
                     let date = date.get();
                     (!date.is_empty()).then(|| text(date).nowrap())
                 }),
-        )
+        );
+
+    // The clock is the only text sitting directly on the wallpaper; everything
+    // else is on a card. Without one it sits on a flat colour and needs nothing.
+    if screen.wallpaper().is_some() {
+        clock.text_shadow(SHADOW)
+    } else {
+        clock
+    }
 }
