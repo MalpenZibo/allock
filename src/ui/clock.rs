@@ -89,7 +89,6 @@ pub fn view(screen: &Screen) -> Container {
         .child(frosted(
             text(move || time.get()).font_size(96.0).nowrap().bold(),
             theme.text,
-            TINT,
             glass,
         ))
         .child(move || {
@@ -98,7 +97,6 @@ pub fn view(screen: &Screen) -> Container {
                 frosted(
                     text(date).font_size(42.0).nowrap().bold(),
                     theme.text_weak,
-                    TINT,
                     glass,
                 )
             })
@@ -113,11 +111,13 @@ pub fn view(screen: &Screen) -> Container {
 
 /// A text made of glass, or left alone.
 ///
-/// `tint` is what survives of `color` over the blur: the fill is drawn *over*
-/// the frost, so an opaque one would hide the very thing being blurred.
-fn frosted(text: Text, color: Color, tint: f32, glass: bool) -> Text {
+/// Over the frost the colour arrives at [`TINT`], because the fill is drawn
+/// *over* what the blur put inside the letter and an opaque one would hide it.
+/// Only the colour is the caller's: how much of it survives the glass is the
+/// same everywhere on this clock.
+fn frosted(text: Text, color: Color, glass: bool) -> Text {
     if glass {
-        text.color(color.with_alpha(tint)).backdrop_blur(FROST)
+        text.color(color.with_alpha(TINT)).backdrop_blur(FROST)
     } else {
         // Nothing behind it to blur — a blur of a flat colour is that same flat
         // colour — so it goes back to being ordinary text.
