@@ -14,19 +14,25 @@ use super::Screen;
 /// that already blurs its own box.
 const FROST: f32 = 16.0;
 
+/// The contour that draws the clock's edge.
+///
+/// On glass this is a real outline: guido dilates the coverage mask the frost
+/// already needs and draws the band outside the letter. The cheap stroke —
+/// copies of the glyphs under the fill — would ring the letter *and* fill it,
+/// which under an opaque fill nobody notices and over glass is a black clock.
+/// That was the first thing this screen showed me.
+const STROKE: TextStroke = TextStroke {
+    width: 2.0,
+    color: Color::rgba(0.0, 0.0, 0.0, 0.75),
+};
+
 /// What is left of the text colour over the glass.
 ///
-/// The tint is the only thing holding the clock together, and it has to be,
-/// because the two decorations that would otherwise do it cannot. A stroke and
-/// a shadow are both drawn as copies of the glyphs *under* the fill, so they
-/// cover the letter's own area and not only its edge: invisible and free under
-/// an opaque fill, and a black letter where the wallpaper should be over
-/// glass. Tried on screen, seen, removed.
-///
-/// The date carries more of it than the hour, being a third of the size, where
-/// a pure hole reads as a smudge rather than as a date.
-const HOUR_TINT: f32 = 0.3;
-const DATE_TINT: f32 = 0.55;
+/// The hour keeps none: with a contour around it there is nothing else the
+/// fill has to do, and a hole is the whole point. The date keeps a little,
+/// being a third of the size, where a pure hole reads as a smudge.
+const HOUR_TINT: f32 = 0.0;
+const DATE_TINT: f32 = 0.35;
 
 /// A signal holding the current local time.
 ///
@@ -72,7 +78,7 @@ pub fn view(screen: &Screen) -> Container {
 
     let glass = screen.wallpaper().is_some();
 
-    container()
+    let clock = container()
         .layout(
             Flex::column()
                 .spacing(2.0)
@@ -96,7 +102,13 @@ pub fn view(screen: &Screen) -> Container {
                     glass,
                 )
             })
-        })
+        });
+
+    if glass {
+        clock.text_stroke(STROKE)
+    } else {
+        clock
+    }
 }
 
 /// A text made of glass, or left alone.
