@@ -28,11 +28,11 @@ const STROKE: TextStroke = TextStroke {
 
 /// What is left of the text colour over the glass.
 ///
-/// The hour keeps none: with a contour around it there is nothing else the
-/// fill has to do, and a hole is the whole point. The date keeps a little,
-/// being a third of the size, where a pure hole reads as a smudge.
-const HOUR_TINT: f32 = 0.0;
-const DATE_TINT: f32 = 0.35;
+/// The same on both lines. A hole with no tint at all is only as legible as
+/// whatever happens to be behind it, and the wallpaper is not something the
+/// clock gets to choose; a third of the colour holds the numerals together and
+/// still reads as glass. The contour above draws the edge, this fills it.
+const TINT: f32 = 0.35;
 
 /// A signal holding the current local time.
 ///
@@ -89,7 +89,7 @@ pub fn view(screen: &Screen) -> Container {
         .child(frosted(
             text(move || time.get()).font_size(96.0).nowrap().bold(),
             theme.text,
-            HOUR_TINT,
+            TINT,
             glass,
         ))
         .child(move || {
@@ -98,7 +98,7 @@ pub fn view(screen: &Screen) -> Container {
                 frosted(
                     text(date).font_size(42.0).nowrap().bold(),
                     theme.text_weak,
-                    DATE_TINT,
+                    TINT,
                     glass,
                 )
             })

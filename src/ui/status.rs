@@ -49,7 +49,7 @@ fn battery(screen: &Screen) -> Container {
         ))
     });
 
-    // The chip is rebuilt whenever the reading changes, and each rebuild needs
+    // The card is rebuilt whenever the reading changes, and each rebuild needs
     // its own frosted surface, so the closure owns a Screen rather than
     // borrowing the caller's.
     let screen = screen.clone();
@@ -59,23 +59,23 @@ fn battery(screen: &Screen) -> Container {
 
         Some(
             super::card_surface(&screen)
-                .corner_radius(16.0)
+                .corner_radius(32.0)
                 .squircle()
                 .child(
                     container()
-                        .padding([10.0, 18.0])
+                        .padding([12.0, 24.0])
                         // Baseline, not Center: the glyph and the reading are
                         // different sizes, and lining their boxes up leaves
                         // them floating at unrelated heights.
                         .layout(
                             Flex::row()
-                                .spacing(10.0)
+                                .spacing(12.0)
                                 .cross_alignment(CrossAlignment::Baseline),
                         )
-                        .child(icon().kind(battery_icon).font_size(24.0).color(color))
+                        .child(icon().kind(battery_icon).font_size(64.0).color(color))
                         .child(
                             text(format!("{capacity}%"))
-                                .font_size(19.0)
+                                .font_size(48.0)
                                 // Charging tints the reading to match the icon.
                                 .color(if charging { color } else { theme.text })
                                 .nowrap(),
