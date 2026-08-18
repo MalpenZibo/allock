@@ -119,6 +119,11 @@ Set `fingerprint = false` to require the password. No reader, no enrolled
 finger, or no fprintd all mean the same thing — the password is the only way
 in, and the hint disappears.
 
+Every scan answers. A finger that is read and not recognised says so and
+counts down the tries left — `[auth] fingerprint_retries`, five by default —
+and when they run out the line says the reader has stopped rather than going
+quiet, because a screen that says nothing looks like a broken sensor.
+
 ## Greeter mode
 
 Point greetd at it in `/etc/greetd/config.toml`, inside a compositor:

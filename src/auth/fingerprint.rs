@@ -48,19 +48,73 @@ pub async fn run(
     event_tx: mpsc::Sender<AuthEvent>,
     state: WriteSignal<FingerprintState>,
 ) {
-    if let Err(e) = verify_loop(&config, &event_tx, state).await {
-        // Not an error the user needs to see: it only means the password is
-        // the only way in, which the UI already shows by hiding the hint.
-        log::info!("fingerprint unavailable: {e}");
+    match verify_loop(&config, &event_tx, state).await {
+        // The loop settled on a state of its own — `Exhausted` after too many
+        // misses — and it is the one the user has to read. Overwriting it here
+        // was how the screen came to say nothing at all after five wrong
+        // fingers: the reader had given up, and the only sign of it was the
+        // hint vanishing.
+        Ok(Outcome::Settled) => {}
+        Ok(Outcome::Unavailable) => state.set(FingerprintState::Unavailable),
+        Err(e) => {
+            // Not an error the user needs to see: it only means the password
+            // is the only way in, which the UI shows by hiding the hint.
+            log::info!("fingerprint unavailable: {e}");
+            state.set(FingerprintState::Unavailable);
+        }
     }
-    state.set(FingerprintState::Unavailable);
+}
+
+/// How the loop ended, for the one decision the caller still has to make.
+enum Outcome {
+    /// The loop has already set the state the user should see.
+    Settled,
+    /// Nothing to verify against — no reader, no enrolled finger, no daemon.
+    Unavailable,
+}
+
+/// What one `VerifyStatus` means for the screen.
+#[derive(Debug, PartialEq)]
+enum Step {
+    Matched,
+    /// A finger was read and it was not the right one.
+    Missed,
+    /// Something to tell the user about the scan itself.
+    Hint(&'static str),
+    Ignored,
+}
+
+fn step_for(result: &str) -> Step {
+    match result {
+        "verify-match" => Step::Matched,
+        "verify-no-match" => Step::Missed,
+        "verify-retry-scan" => Step::Hint("Try scanning again"),
+        "verify-swipe-too-short" => Step::Hint("Swipe was too short"),
+        "verify-finger-not-centered" => Step::Hint("Centre your finger"),
+        "verify-remove-and-retry" => Step::Hint("Lift your finger and retry"),
+        "verify-disconnected" | "verify-unknown-error" => Step::Hint("Fingerprint reader failed"),
+        _ => Step::Ignored,
+    }
+}
+
+/// What to say about a finger that was read and not recognised.
+///
+/// With the count in it, because the reader stopping is otherwise a surprise:
+/// the screen went quiet and the sensor stopped answering, with nothing having
+/// said that the tries were running out.
+fn miss_hint(misses: u32, retries: u32) -> String {
+    match retries.saturating_sub(misses) {
+        0 => "Not recognised".to_owned(),
+        1 => "Not recognised — one try left".to_owned(),
+        left => format!("Not recognised — {left} tries left"),
+    }
 }
 
 async fn verify_loop(
     config: &FingerprintConfig,
     event_tx: &mpsc::Sender<AuthEvent>,
     state: WriteSignal<FingerprintState>,
-) -> zbus::Result<()> {
+) -> zbus::Result<Outcome> {
     let connection = zbus::Connection::system().await?;
     let manager = FprintManagerProxy::new(&connection).await?;
     let device_path = manager.get_default_device().await?;
@@ -76,7 +130,7 @@ async fn verify_loop(
         .is_ok_and(|fingers| fingers.is_empty())
     {
         log::info!("no enrolled fingers for {}", config.user);
-        return Ok(());
+        return Ok(Outcome::Unavailable);
     }
 
     // Claiming is exclusive: hold it only while the screen is up. Dropping
@@ -87,32 +141,38 @@ async fn verify_loop(
     let mut status = device.receive_verify_status().await?;
     let mut misses = 0;
 
+    // Said once, before the first finger. Setting it again at the top of every
+    // round is what wiped the answer to the round before it: a hint would
+    // appear for as long as it took fprintd to be asked again, and vanish.
+    state.set(FingerprintState::Waiting);
+
     while misses < config.retries {
         device.verify_start("any").await?;
-        state.set(FingerprintState::Waiting);
 
         let done = loop {
             use futures::StreamExt;
             let Some(signal) = status.next().await else {
-                return Ok(());
+                return Ok(Outcome::Unavailable);
             };
             let Ok(args) = signal.args() else { continue };
 
             log::debug!("fprintd: {} (done={})", args.result, args.done);
 
-            // The only accepting branch in the whole module.
-            if args.result == "verify-match" {
-                let _ = event_tx.send(AuthEvent::Success).await;
-                let _ = device.verify_stop().await;
-                return Ok(());
+            match step_for(&args.result) {
+                // The only accepting branch in the whole module.
+                Step::Matched => {
+                    let _ = event_tx.send(AuthEvent::Success).await;
+                    let _ = device.verify_stop().await;
+                    return Ok(Outcome::Settled);
+                }
+                Step::Missed => {
+                    misses += 1;
+                    state.set(FingerprintState::Retry(miss_hint(misses, config.retries)));
+                }
+                Step::Hint(hint) => state.set(FingerprintState::Retry(hint.to_owned())),
+                Step::Ignored => {}
             }
 
-            if args.result == "verify-no-match" {
-                misses += 1;
-            }
-            if let Some(hint) = hint_for(&args.result) {
-                state.set(FingerprintState::Retry(hint.to_owned()));
-            }
             if args.done {
                 break true;
             }
@@ -125,20 +185,7 @@ async fn verify_loop(
     }
 
     state.set(FingerprintState::Exhausted);
-    Ok(())
-}
-
-/// fprintd result strings worth repeating to the user. `verify-match` and
-/// `verify-no-match` are handled by the caller and deliberately absent.
-fn hint_for(result: &str) -> Option<&'static str> {
-    match result {
-        "verify-retry-scan" => Some("Try scanning again"),
-        "verify-swipe-too-short" => Some("Swipe was too short"),
-        "verify-finger-not-centered" => Some("Centre your finger"),
-        "verify-remove-and-retry" => Some("Lift your finger and retry"),
-        "verify-disconnected" | "verify-unknown-error" => Some("Fingerprint reader failed"),
-        _ => None,
-    }
+    Ok(Outcome::Settled)
 }
 
 /// Releases the device however the loop leaves — including a cancellation of
@@ -159,5 +206,53 @@ impl Drop for ClaimGuard {
                 let _ = device.release().await;
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The result that made the screen go quiet. A finger that is read and
+    /// rejected is the most ordinary thing that can happen at a lock screen,
+    /// and it was the one status with nothing to say about it: `hint_for`
+    /// returned `None` for it and the loop only counted it.
+    #[test]
+    fn a_finger_that_is_not_recognised_has_something_to_say() {
+        assert_eq!(step_for("verify-no-match"), Step::Missed);
+        assert!(!miss_hint(1, 5).is_empty());
+    }
+
+    #[test]
+    fn the_hint_counts_down_to_the_last_try() {
+        assert_eq!(miss_hint(1, 5), "Not recognised — 4 tries left");
+        assert_eq!(miss_hint(4, 5), "Not recognised — one try left");
+        assert_eq!(miss_hint(5, 5), "Not recognised");
+        // However the config is set, the count never runs past zero.
+        assert_eq!(miss_hint(9, 5), "Not recognised");
+    }
+
+    #[test]
+    fn a_match_is_the_only_accepting_step() {
+        assert_eq!(step_for("verify-match"), Step::Matched);
+        for other in [
+            "verify-no-match",
+            "verify-retry-scan",
+            "verify-swipe-too-short",
+            "verify-finger-not-centered",
+            "verify-remove-and-retry",
+            "verify-disconnected",
+            "verify-unknown-error",
+            "something-fprintd-grew-later",
+        ] {
+            assert_ne!(step_for(other), Step::Matched, "{other} must not unlock");
+        }
+    }
+
+    /// A status allock has never heard of is not a scan result: saying
+    /// something about it would be inventing it.
+    #[test]
+    fn an_unknown_status_says_nothing() {
+        assert_eq!(step_for("verify-something-new"), Step::Ignored);
     }
 }

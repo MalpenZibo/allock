@@ -244,7 +244,12 @@ fn fingerprint_hint(screen: &Screen) -> Container {
                 theme.text_weak,
             ),
             FingerprintState::Retry(hint) => (hint.clone(), theme.warning),
-            FingerprintState::Exhausted => ("Fingerprint unavailable".to_owned(), theme.text_weak),
+            // The reader has stopped answering, and the screen has to say so —
+            // silence reads as a broken sensor.
+            FingerprintState::Exhausted => (
+                "Too many fingerprint attempts — use your password".to_owned(),
+                theme.text_weak,
+            ),
             FingerprintState::Unavailable => unreachable!("filtered above"),
         };
 
