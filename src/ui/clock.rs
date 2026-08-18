@@ -87,7 +87,7 @@ pub fn view(screen: &Screen) -> Container {
         // The colour is inherited from the screen root; only the sizes, the
         // glass and the dimmer date differ from it.
         .child(frosted(
-            text(move || time.get()).font_size(96.0).nowrap(),
+            text(move || time.get()).font_size(96.0).nowrap().bold(),
             theme.text,
             HOUR_TINT,
             glass,
@@ -96,7 +96,7 @@ pub fn view(screen: &Screen) -> Container {
             let date = date.get();
             (!date.is_empty()).then(|| {
                 frosted(
-                    text(date).font_size(42.0).nowrap(),
+                    text(date).font_size(42.0).nowrap().bold(),
                     theme.text_weak,
                     DATE_TINT,
                     glass,
