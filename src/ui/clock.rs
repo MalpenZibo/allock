@@ -14,22 +14,19 @@ use super::Screen;
 /// that already blurs its own box.
 const FROST: f32 = 16.0;
 
-/// A contour around the glass.
+/// What is left of the text colour over the glass.
 ///
-/// Frost softens what is behind the glyphs; it does not darken it, so on its
-/// own it leaves the clock as legible as the wallpaper allows — which over a
-/// bright photograph is not very. The stroke is what draws the edge, and it is
-/// the whole of the clock's legibility now that the fill is a hole.
-const STROKE: TextStroke = TextStroke {
-    width: 4.0,
-    color: Color::BLACK,
-};
-
-/// What is left of the text colour over the glass: nothing at all for the
-/// hour, a little for the date, which is small enough that a pure hole reads
-/// as smudge rather than as numerals.
-const HOUR_TINT: f32 = 0.0;
-const DATE_TINT: f32 = 0.6;
+/// The tint is the only thing holding the clock together, and it has to be,
+/// because the two decorations that would otherwise do it cannot. A stroke and
+/// a shadow are both drawn as copies of the glyphs *under* the fill, so they
+/// cover the letter's own area and not only its edge: invisible and free under
+/// an opaque fill, and a black letter where the wallpaper should be over
+/// glass. Tried on screen, seen, removed.
+///
+/// The date carries more of it than the hour, being a third of the size, where
+/// a pure hole reads as a smudge rather than as a date.
+const HOUR_TINT: f32 = 0.3;
+const DATE_TINT: f32 = 0.55;
 
 /// A signal holding the current local time.
 ///
@@ -75,7 +72,7 @@ pub fn view(screen: &Screen) -> Container {
 
     let glass = screen.wallpaper().is_some();
 
-    let clock = container()
+    container()
         .layout(
             Flex::column()
                 .spacing(2.0)
@@ -99,13 +96,7 @@ pub fn view(screen: &Screen) -> Container {
                     glass,
                 )
             })
-        });
-
-    if glass {
-        clock.text_stroke(STROKE)
-    } else {
-        clock
-    }
+        })
 }
 
 /// A text made of glass, or left alone.
