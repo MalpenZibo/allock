@@ -1,8 +1,7 @@
 //! The login card: who is logging in, the field, and why the last attempt
 //! did not work.
 
-use std::time::Duration;
-
+use guido::animation::Keyframes;
 use guido::prelude::*;
 
 use super::Screen;
@@ -26,58 +25,21 @@ const CAPS_LOCK_GLYPH: &str = "\u{f0632}";
 const FIELD_WIDTH: f32 = 360.0;
 const AVATAR_SIZE: f32 = 76.0;
 
-/// The wobble a refused attempt gets: degrees to turn to, and how long to
-/// hold each one.
+/// The wobble a refused attempt gets.
 ///
-/// Small angles and a decaying amplitude — this is the shake of a head saying
-/// no, not a machine falling over. It runs about a third of a second, which is
-/// long enough to be seen and short enough that a second wrong password can
-/// start its own before the first is forgotten.
-const SHAKE: [(f32, u64); 6] = [
-    (1.2, 55),
-    (-1.2, 55),
-    (0.9, 50),
-    (-0.9, 50),
-    (0.45, 45),
-    (-0.45, 45),
-];
-
-/// The card's angle, turned by every attempt the backend refuses.
-///
-/// Driven from a service because a shake is a sequence in time and guido's
-/// transitions animate towards a value: the service writes the corners, the
-/// transition rounds them off.
-fn shake(state: crate::auth::AuthState) -> Signal<f32> {
-    let angle = create_signal(0.0f32);
-    let writer = angle.writer();
-
-    let wobble = create_service::<(), _, _>(move |mut rx, ctx| async move {
-        while ctx.is_running() {
-            if rx.recv().await.is_none() {
-                break;
-            }
-            // Whatever else arrived while this one was running is the same
-            // news: one wobble per burst, not a queue of them.
-            while rx.try_recv().is_ok() {}
-
-            for (degrees, hold) in SHAKE {
-                writer.set(degrees);
-                tokio::time::sleep(Duration::from_millis(hold)).await;
-            }
-            writer.set(0.0);
-        }
-    });
-
-    let rejections = state.rejections;
-    create_effect(move || {
-        // Reading it is the subscription; the count starts at zero, so the
-        // effect's own first run is not a refusal.
-        if rejections.get() > 0 {
-            wobble.send(());
-        }
-    });
-
-    angle.read_only()
+/// Small angles and a decaying amplitude — the shake of a head saying no, not a
+/// machine falling over. A third of a second: long enough to be seen, short
+/// enough that a second wrong password can start its own before the first is
+/// forgotten. Started again mid-run it restarts, which is what a second refusal
+/// means.
+fn shake() -> Keyframes<Transform> {
+    Keyframes::new(320.0)
+        .at(0.0, Transform::IDENTITY)
+        .at(0.15, Transform::rotate_degrees(1.2))
+        .at(0.40, Transform::rotate_degrees(-1.2))
+        .at(0.65, Transform::rotate_degrees(0.9))
+        .at(0.85, Transform::rotate_degrees(-0.45))
+        .at(1.0, Transform::IDENTITY)
 }
 
 pub fn view(screen: Screen) -> Container {
@@ -94,17 +56,14 @@ pub fn view(screen: Screen) -> Container {
         .child(notice(&screen))
         .child(fingerprint_hint(&screen));
 
-    let angle = shake(screen.auth.state);
-
     super::card_surface(&screen)
         .corner_radius(22.0)
         .squircle()
         .elevation(3.0)
-        // Turned about its own centre, which is the default origin.
-        .transform(move || Transform::rotate_degrees(angle.get()))
-        // Each corner of the wobble is reached rather than jumped to: shorter
-        // than the hold, so the card is still by the time the next one comes.
-        .animate_transform(Transition::new(45.0, TimingFunction::EaseOut))
+        // Turned about its own centre, which is the default origin. Played by
+        // the count of refused attempts, so the second wrong password shakes as
+        // loudly as the first.
+        .keyframes_transform(shake(), screen.auth.state.rejections)
         .layout(ZStack::new())
         .child(content)
 }
