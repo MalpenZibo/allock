@@ -95,7 +95,11 @@ waiting on something other than the keyboard.
 
 It draws no caret. On a masked field every character looks the same and you are
 always at the end, so the caret says nothing — and it would be the one thing a
-still lock screen redraws on its own, twice a second, all night.
+still lock screen redraws on its own, twice a second, all night. What says where
+the keys are going is the border: it lights up while the field holds the
+keyboard, and steps aside for the colour of a failed attempt, which has more to
+say. With two monitors that is the whole answer to which screen is listening —
+both draw the form, one has the focus.
 
 Pasting *into* the field works; nothing can copy out of it. Blocking paste is
 what banking sites are mocked for — it stops password managers, not attackers —

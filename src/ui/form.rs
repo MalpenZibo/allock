@@ -75,18 +75,17 @@ fn avatar(screen: &Screen) -> Container {
         })
 }
 
-fn name(screen: &Screen) -> Container {
+fn name(screen: &Screen) -> Text {
     let user = screen.user;
 
-    container().font_size(21.0).child(
-        text(move || {
-            user.get()
-                .map(|user| user.display_name)
-                // The greeter has nobody yet: the field itself asks.
-                .unwrap_or_else(|| "Sign in".to_owned())
-        })
-        .nowrap(),
-    )
+    text(move || {
+        user.get()
+            .map(|user| user.display_name)
+            // The greeter has nobody yet: the field itself asks.
+            .unwrap_or_else(|| "Sign in".to_owned())
+    })
+    .font_size(21.0)
+    .nowrap()
 }
 
 /// The input field.
@@ -99,7 +98,9 @@ fn name(screen: &Screen) -> Container {
 ///
 /// It takes the keyboard by itself (`autofocus`), which is why there is nothing
 /// to click before typing — see [`super::attach_keys`] for the keys the field
-/// does not want.
+/// does not want. With no caret, the border is the only thing that says where
+/// the keys are going, which matters on a second monitor: it draws the same
+/// form, and does not hold the focus.
 fn field(screen: &Screen) -> Container {
     let theme = screen.theme;
     let auth = screen.auth;
@@ -109,6 +110,12 @@ fn field(screen: &Screen) -> Container {
     // for a password. A memo, so the field is rebuilt when the answer flips
     // rather than on every prompt — `password()` takes a bool, not a signal.
     let secret = create_memo(move || is_secret(&state.prompt.get()));
+    let failed = create_memo(move || {
+        matches!(
+            state.notice.get().map(|notice| notice.level),
+            Some(NoticeLevel::Error)
+        )
+    });
 
     container()
         .width(FIELD_WIDTH)
@@ -118,18 +125,15 @@ fn field(screen: &Screen) -> Container {
         // backdrop colour, so the field reads as a well rather than another
         // panel.
         .background(with_alpha(theme.background, 0.55))
-        .border(1.5, move || {
-            if state.busy.get() {
-                with_alpha(theme.primary, 0.7)
-            } else if matches!(
-                state.notice.get().map(|notice| notice.level),
-                Some(NoticeLevel::Error)
-            ) {
-                theme.danger
-            } else {
-                with_alpha(theme.text, 0.15)
-            }
-        })
+        .border(1.5, with_alpha(theme.text, 0.15))
+        // Three layers over that base, and the order is the ranking: the last
+        // one that applies and speaks about the border wins. The ring is
+        // declared first because it is the weakest of the three — this field
+        // holds the focus essentially all the time, so a ring that outranked
+        // the others would be a ring that hid them.
+        .when_focused(|s| s.border(1.5, with_alpha(theme.primary, 0.6)))
+        .state(failed, |s| s.border(1.5, theme.danger))
+        .state(state.busy, |s| s.border(1.5, theme.primary))
         .child(
             container()
                 .padding([12.0, 16.0])
@@ -139,23 +143,22 @@ fn field(screen: &Screen) -> Container {
                         .cross_alignment(CrossAlignment::Center),
                 )
                 .child(
-                    container()
-                        .width(fill())
-                        .font_size(16.0)
-                        .text_color(theme.text)
-                        .placeholder_color(with_alpha(theme.text, 0.4))
-                        // Rebuilt when the mask flips. The old input leaving the
-                        // tree drops the focus, which the new one's `autofocus`
-                        // then takes — so the greeter's username step becomes the
-                        // password step without a click.
-                        .child(move || {
-                            text_input(state.input)
-                                .password(secret.get())
-                                .placeholder(move || prompt_label(&state.prompt.get()))
-                                .no_caret()
-                                .autofocus()
-                                .on_submit(move |_| auth.submit())
-                        }),
+                    // Only the width is the container's business now; the input
+                    // dresses itself. Rebuilt when the mask flips: the old input
+                    // leaving the tree drops the focus, which the new one's
+                    // `autofocus` then takes — so the greeter's username step
+                    // becomes the password step without a click.
+                    container().width(fill()).child(move || {
+                        text_input(state.input)
+                            .password(secret.get())
+                            .placeholder(move || prompt_label(&state.prompt.get()))
+                            .font_size(16.0)
+                            .color(theme.text)
+                            .placeholder_color(with_alpha(theme.text, 0.4))
+                            .no_caret()
+                            .autofocus()
+                            .on_submit(move |_| auth.submit())
+                    }),
                 )
                 // Inside the field, where every other password field puts it:
                 // the warning is about what this box is receiving. Read from the
@@ -214,13 +217,13 @@ fn notice(screen: &Screen) -> Container {
         .layout(Flex::column().main_alignment(MainAlignment::Center))
         .child(move || {
             state.notice.get().filter(|n| !n.text.is_empty()).map(|n| {
-                container()
+                text(n.text)
                     .font_size(13.0)
-                    .text_color(match n.level {
+                    .color(match n.level {
                         NoticeLevel::Error => theme.danger,
                         NoticeLevel::Info => theme.text_weak,
                     })
-                    .child(text(n.text).nowrap())
+                    .nowrap()
             })
         })
 }
@@ -247,8 +250,6 @@ fn fingerprint_hint(screen: &Screen) -> Container {
 
         Some(
             container()
-                .font_size(13.0)
-                .text_color(color)
                 .layout(
                     Flex::row()
                         .spacing(7.0)
@@ -260,7 +261,7 @@ fn fingerprint_hint(screen: &Screen) -> Container {
                         .font_size(15.0)
                         .color(color),
                 )
-                .child(text(message).nowrap()),
+                .child(text(message).font_size(13.0).color(color).nowrap()),
         )
     })
 }
