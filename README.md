@@ -192,6 +192,19 @@ anything.
 Set `[background] blur = 0` for plain translucent cards, and `card_opacity` for
 how much tint covers the blur.
 
+### A clock made of glass
+
+The clock is the only text sitting directly on the wallpaper, and it asks for
+the same effect with the shape of its own glyphs: the numerals are a hole onto
+the picture behind them, blurred. Where a card frosts a box, the clock frosts
+the letters.
+
+The hour has no fill left at all — an opaque one would hide the very thing
+being blurred — so what draws its edge is a black contour rather than its
+colour, and the date keeps a little tint because at its size a pure hole reads
+as a smudge. Without a wallpaper none of it applies: a blur of a flat colour is
+that same flat colour, and the clock goes back to being ordinary text.
+
 ### Known limitations
 
 - **The password is not scrubbed from memory.** It lives in a `String` — guido's

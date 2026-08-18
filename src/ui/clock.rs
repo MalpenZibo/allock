@@ -7,16 +7,29 @@ use guido::prelude::*;
 
 use super::Screen;
 
-/// Over a photograph no single text colour works: the picture is light in some
-/// places and dark in others. Darkening the neighbourhood each glyph sits in
-/// separates the clock from whatever is behind it without tinting the
-/// wallpaper further — `[background] dim` is the user's choice, not a
-/// legibility crutch.
-const SHADOW: TextShadow = TextShadow {
-    offset: (0.0, 2.0),
-    blur: 10.0,
-    color: Color::rgba(0.0, 0.0, 0.0, 0.6),
+/// The clock is glass: the glyphs show the wallpaper behind them, blurred.
+///
+/// Nothing else on the screen does this, and that is the point — the clock is
+/// the one thing sitting directly on the picture, everything else is on a card
+/// that already blurs its own box.
+const FROST: f32 = 16.0;
+
+/// A contour around the glass.
+///
+/// Frost softens what is behind the glyphs; it does not darken it, so on its
+/// own it leaves the clock as legible as the wallpaper allows — which over a
+/// bright photograph is not very. The stroke is what draws the edge, and it is
+/// the whole of the clock's legibility now that the fill is a hole.
+const STROKE: TextStroke = TextStroke {
+    width: 4.0,
+    color: Color::BLACK,
 };
+
+/// What is left of the text colour over the glass: nothing at all for the
+/// hour, a little for the date, which is small enough that a pure hole reads
+/// as smudge rather than as numerals.
+const HOUR_TINT: f32 = 0.0;
+const DATE_TINT: f32 = 0.6;
 
 /// A signal holding the current local time.
 ///
@@ -60,25 +73,51 @@ pub fn view(screen: &Screen) -> Container {
         }
     });
 
+    let glass = screen.wallpaper().is_some();
+
     let clock = container()
         .layout(
             Flex::column()
                 .spacing(2.0)
                 .cross_alignment(CrossAlignment::Center),
         )
-        // The colour is inherited from the screen root; only the sizes and the
-        // dimmer date differ from it.
-        .child(text(move || time.get()).font_size(76.0).nowrap())
+        // The colour is inherited from the screen root; only the sizes, the
+        // glass and the dimmer date differ from it.
+        .child(frosted(
+            text(move || time.get()).font_size(96.0).nowrap(),
+            theme.text,
+            HOUR_TINT,
+            glass,
+        ))
         .child(move || {
             let date = date.get();
-            (!date.is_empty()).then(|| text(date).font_size(18.0).color(theme.text_weak).nowrap())
+            (!date.is_empty()).then(|| {
+                frosted(
+                    text(date).font_size(42.0).nowrap(),
+                    theme.text_weak,
+                    DATE_TINT,
+                    glass,
+                )
+            })
         });
 
-    // The clock is the only text sitting directly on the wallpaper; everything
-    // else is on a card. Without one it sits on a flat colour and needs nothing.
-    if screen.wallpaper().is_some() {
-        clock.text_shadow(SHADOW)
+    if glass {
+        clock.text_stroke(STROKE)
     } else {
         clock
+    }
+}
+
+/// A text made of glass, or left alone.
+///
+/// `tint` is what survives of `color` over the blur: the fill is drawn *over*
+/// the frost, so an opaque one would hide the very thing being blurred.
+fn frosted(text: Text, color: Color, tint: f32, glass: bool) -> Text {
+    if glass {
+        text.color(color.with_alpha(tint)).backdrop_blur(FROST)
+    } else {
+        // Nothing behind it to blur — a blur of a flat colour is that same flat
+        // colour — so it goes back to being ordinary text.
+        text.color(color)
     }
 }
