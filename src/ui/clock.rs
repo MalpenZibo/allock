@@ -68,20 +68,11 @@ pub fn view(screen: &Screen) -> Container {
         )
         // The colour is inherited from the screen root; only the sizes and the
         // dimmer date differ from it.
-        .child(
-            container()
-                .font_size(76.0)
-                .child(text(move || time.get()).nowrap()),
-        )
-        .child(
-            container()
-                .font_size(18.0)
-                .text_color(theme.text_weak)
-                .child(move || {
-                    let date = date.get();
-                    (!date.is_empty()).then(|| text(date).nowrap())
-                }),
-        );
+        .child(text(move || time.get()).font_size(76.0).nowrap())
+        .child(move || {
+            let date = date.get();
+            (!date.is_empty()).then(|| text(date).font_size(18.0).color(theme.text_weak).nowrap())
+        });
 
     // The clock is the only text sitting directly on the wallpaper; everything
     // else is on a card. Without one it sits on a flat colour and needs nothing.

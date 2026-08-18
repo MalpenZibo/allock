@@ -74,11 +74,11 @@ fn battery(screen: &Screen) -> Container {
                         )
                         .child(icon().kind(battery_icon).font_size(24.0).color(color))
                         .child(
-                            container()
+                            text(format!("{capacity}%"))
                                 .font_size(19.0)
                                 // Charging tints the reading to match the icon.
-                                .text_color(if charging { color } else { theme.text })
-                                .child(text(format!("{capacity}%")).nowrap()),
+                                .color(if charging { color } else { theme.text })
+                                .nowrap(),
                         ),
                 ),
         )
@@ -121,10 +121,9 @@ fn session_picker(screen: &Screen) -> Container {
                         .color(theme.text_weak),
                 )
                 .child(
-                    container().font_size(15.0).child(
-                        text(move || names.get(index.get() % count).cloned().unwrap_or_default())
-                            .nowrap(),
-                    ),
+                    text(move || names.get(index.get() % count).cloned().unwrap_or_default())
+                        .font_size(15.0)
+                        .nowrap(),
                 ),
         );
 
@@ -134,7 +133,7 @@ fn session_picker(screen: &Screen) -> Container {
     }
 
     button
-        .hover_state(|s| s.lighter(0.08))
-        .pressed_state(|s| s.ripple())
+        .when_hovered(|s| s.lighter(0.08))
+        .when_pressed(|s| s.ripple())
         .on_click(move || index.update(|i| *i = (*i + 1) % count))
 }

@@ -340,8 +340,8 @@ pub fn icon(
     #[prop(default = "Color::WHITE")] color: Color,
     #[prop(default = "14.0")] font_size: f32,
 ) -> impl Widget {
-    container()
-        .text_color(color)
+    text(move || kind.get().get_str().to_string())
+        .color(color)
         .font_size(font_size)
         .font_family(move || {
             let i = kind.get();
@@ -351,5 +351,4 @@ pub fn icon(
                 i.font_family()
             }
         })
-        .child(text(move || kind.get().get_str().to_string()))
 }
