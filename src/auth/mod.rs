@@ -39,6 +39,10 @@ pub enum AuthEvent {
     Success,
     /// This attempt failed; the backend has restarted the conversation.
     Failed(String),
+    /// An attempt was read and refused, with nothing to say about it that the
+    /// screen is not already saying. The fingerprint reader's no-match: the
+    /// hint beside the sensor covers the words, this covers the fact.
+    Rejected,
     /// The backend is gone and will ask nothing more.
     Ended(String),
 }
@@ -111,6 +115,11 @@ pub struct AuthState {
     /// answers, so a second Enter cannot queue a second attempt.
     pub busy: RwSignal<bool>,
     pub notice: RwSignal<Option<Notice>>,
+    /// How many attempts have been refused. A count rather than a flag,
+    /// because two identical refusals are two events and a signal that stays
+    /// equal notifies nobody — the second wrong password has to be as loud as
+    /// the first.
+    pub rejections: RwSignal<u32>,
     /// Set only by [`AuthEvent::Success`].
     pub authenticated: RwSignal<bool>,
     pub fingerprint: RwSignal<FingerprintState>,
@@ -129,6 +138,7 @@ impl AuthState {
             prompt: create_signal(None),
             busy: create_signal(false),
             notice: create_signal(None),
+            rejections: create_signal(0),
             authenticated: create_signal(false),
             fingerprint: create_signal(FingerprintState::default()),
             input: create_signal(String::new()),
@@ -211,6 +221,7 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let prompt_w = state.prompt.writer();
     let busy_w = state.busy.writer();
     let notice_w = state.notice.writer();
+    let rejections_w = state.rejections.writer();
     let authenticated_w = state.authenticated.writer();
     let fingerprint_w = state.fingerprint.writer();
     let input_w = state.input.writer();
@@ -234,6 +245,10 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
         // The last sender we hold ourselves: dropped so `event_rx` closes once
         // the producers are done, instead of parking the loop forever.
         drop(event_tx);
+
+        // The only writer, so it can be counted here rather than read back
+        // from a signal a background task has no business reading.
+        let mut rejections = 0u32;
 
         loop {
             tokio::select! {
@@ -265,6 +280,12 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                             input_w.set(String::new());
                             busy_w.set(false);
                             notice_w.set(Some(Notice { level: NoticeLevel::Error, text }));
+                            rejections += 1;
+                            rejections_w.set(rejections);
+                        }
+                        AuthEvent::Rejected => {
+                            rejections += 1;
+                            rejections_w.set(rejections);
                         }
                         // The one place the screen is allowed to open.
                         AuthEvent::Success => {

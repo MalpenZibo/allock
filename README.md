@@ -119,6 +119,10 @@ Set `fingerprint = false` to require the password. No reader, no enrolled
 finger, or no fprintd all mean the same thing — the password is the only way
 in, and the hint disappears.
 
+A refused attempt also shakes the card — a small rotation, about a third of a
+second, decaying. Both backends count towards it: a wrong password and a finger
+that was read and not recognised are the same news to the screen.
+
 Every scan answers. A finger that is read and not recognised says so and
 counts down the tries left — `[auth] fingerprint_retries`, five by default —
 and when they run out the line says the reader has stopped rather than going

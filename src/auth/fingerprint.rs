@@ -168,6 +168,7 @@ async fn verify_loop(
                 Step::Missed => {
                     misses += 1;
                     state.set(FingerprintState::Retry(miss_hint(misses, config.retries)));
+                    let _ = event_tx.send(AuthEvent::Rejected).await;
                 }
                 Step::Hint(hint) => state.set(FingerprintState::Retry(hint.to_owned())),
                 Step::Ignored => {}
