@@ -1,16 +1,15 @@
 use guido::prelude::*;
-use guido::reactive::IntoVal;
 
 fn nerd_font_family() -> FontFamily {
-    FontFamily::Name("Symbols Nerd Font".into())
+    FontFamily::name("Symbols Nerd Font")
 }
 
 fn nerd_font_family_mono() -> FontFamily {
-    FontFamily::Name("Symbols Nerd Font Mono".into())
+    FontFamily::name("Symbols Nerd Font Mono")
 }
 
 fn custom_icon_font() -> FontFamily {
-    FontFamily::Name("Ashell Custom Icon".into())
+    FontFamily::name("Ashell Custom Icon")
 }
 
 // ---------------------------------------------------------------------------
@@ -336,9 +335,9 @@ impl IntoVal<Option<IconKind>> for StaticIcon {
 #[component]
 pub fn icon(
     kind: IconKind,
-    #[prop(default = "false")] mono: bool,
-    #[prop(default = "Color::WHITE")] color: Color,
-    #[prop(default = "14.0")] font_size: f32,
+    #[prop(default = false)] mono: bool,
+    #[prop(default = Color::WHITE)] color: Color,
+    #[prop(default = 14.0)] font_size: f32,
 ) -> impl Widget {
     text(move || kind.get().get_str().to_string())
         .color(color)

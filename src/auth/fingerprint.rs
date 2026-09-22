@@ -41,6 +41,17 @@ pub trait FprintDevice {
 
     #[zbus(signal)]
     fn verify_status(&self, result: String, done: bool) -> zbus::Result<()>;
+
+    /// Whether a finger is on the sensor *right now*.
+    ///
+    /// The only thing fprintd says between a touch and its verdict —
+    /// `VerifyStatus` arrives when the scan is already decided. Without this
+    /// the screen has nothing to show for the second or two the reader takes,
+    /// which is exactly the second the user is wondering whether it read them
+    /// at all. A daemon that never emits a change for it simply leaves the
+    /// hint where it was, which is the behaviour this had before.
+    #[zbus(property, name = "finger-present")]
+    fn finger_present(&self) -> zbus::Result<bool>;
 }
 
 pub async fn run(
@@ -110,11 +121,27 @@ fn miss_hint(misses: u32, retries: u32) -> String {
     }
 }
 
+/// What a change in `finger-present` does to the hint beside the sensor.
+///
+/// A finger arriving is always worth saying. A finger leaving is worth saying
+/// only when nothing else has spoken since it arrived — otherwise this is the
+/// module's oldest bug in a new place: "Not recognised" would appear and then
+/// be wiped a moment later by the finger that earned it lifting off.
+fn hint_for_finger(present: bool, reading: bool) -> Option<FingerprintState> {
+    match (present, reading) {
+        (true, _) => Some(FingerprintState::Reading),
+        (false, true) => Some(FingerprintState::Waiting),
+        (false, false) => None,
+    }
+}
+
 async fn verify_loop(
     config: &FingerprintConfig,
     event_tx: &mpsc::Sender<AuthEvent>,
     state: WriteSignal<FingerprintState>,
 ) -> zbus::Result<Outcome> {
+    use futures::StreamExt;
+
     let connection = zbus::Connection::system().await?;
     let manager = FprintManagerProxy::new(&connection).await?;
     let device_path = manager.get_default_device().await?;
@@ -139,7 +166,11 @@ async fn verify_loop(
     let _guard = ClaimGuard(device.clone());
 
     let mut status = device.receive_verify_status().await?;
+    let mut finger = device.receive_finger_present_changed().await;
     let mut misses = 0;
+    // Whether the hint on screen is this scan's and nothing else has replaced
+    // it — see `hint_for_finger`.
+    let mut reading = false;
 
     // Said once, before the first finger. Setting it again at the top of every
     // round is what wiped the answer to the round before it: a hint would
@@ -150,8 +181,23 @@ async fn verify_loop(
         device.verify_start("any").await?;
 
         let done = loop {
-            use futures::StreamExt;
-            let Some(signal) = status.next().await else {
+            let status = tokio::select! {
+                status = status.next() => status,
+                // The touch, not its verdict. The words belong to this module,
+                // which knows what the hint said before; the fact goes to the
+                // conversation, which owns the tick that turns the spinner.
+                Some(change) = finger.next() => {
+                    let present = change.get().await.unwrap_or(false);
+                    if let Some(hint) = hint_for_finger(present, reading) {
+                        state.set(hint);
+                    }
+                    reading = present;
+                    let _ = event_tx.send(AuthEvent::Scanning(present)).await;
+                    continue;
+                }
+            };
+
+            let Some(signal) = status else {
                 return Ok(Outcome::Unavailable);
             };
             let Ok(args) = signal.args() else { continue };
@@ -167,10 +213,14 @@ async fn verify_loop(
                 }
                 Step::Missed => {
                     misses += 1;
+                    reading = false;
                     state.set(FingerprintState::Retry(miss_hint(misses, config.retries)));
                     let _ = event_tx.send(AuthEvent::Rejected).await;
                 }
-                Step::Hint(hint) => state.set(FingerprintState::Retry(hint.to_owned())),
+                Step::Hint(hint) => {
+                    reading = false;
+                    state.set(FingerprintState::Retry(hint.to_owned()));
+                }
                 Step::Ignored => {}
             }
 
@@ -248,6 +298,30 @@ mod tests {
         ] {
             assert_ne!(step_for(other), Step::Matched, "{other} must not unlock");
         }
+    }
+
+    /// The reader used to say nothing at all between the touch and the
+    /// verdict, which is the whole second the user is asking whether it read
+    /// them.
+    #[test]
+    fn a_finger_on_the_sensor_says_so() {
+        assert_eq!(
+            hint_for_finger(true, false),
+            Some(FingerprintState::Reading)
+        );
+    }
+
+    /// The same mistake this module already made once, one signal further out:
+    /// the finger that earned "Not recognised" lifts off a moment later, and
+    /// the lifting must not be what erases it.
+    #[test]
+    fn a_finger_leaving_does_not_wipe_the_answer_it_earned() {
+        assert_eq!(hint_for_finger(false, false), None);
+        // Nothing answered, so the sensor goes back to asking.
+        assert_eq!(
+            hint_for_finger(false, true),
+            Some(FingerprintState::Waiting)
+        );
     }
 
     /// A status allock has never heard of is not a scan result: saying

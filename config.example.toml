@@ -11,11 +11,16 @@ log_level = "warn"
 # Set to "" to skip the import and use allock's built-in defaults.
 ashell_config = "~/.config/ashell/config.toml"
 
-# Which outputs draw the login form. Every output is always covered by a lock
-# surface; the others just show the clock over the same background.
-#   "All"                          — the form on every screen (default)
-#   { Targets = ["eDP-1"] }        — connector name, or a substring of the EDID
-form_outputs = "All"
+# Which outputs draw the interface — clock, login card, status row. Every
+# output is always covered by a lock surface showing the background; this only
+# says which of them carry the controls on top of it.
+#   "All"                          — every screen (default)
+#   { Targets = ["DP-2"] }         — connector name, or a substring of the EDID
+#   { Targets = ["DP-2", "eDP-1"] }— every one that matches, mirrored
+# Naming a monitor that is not connected — or unplugging it while the screen is
+# locked — puts the controls on the first output instead, so they are never on
+# a screen that is not there.
+main_output = "All"
 
 [background]
 # Omit for a plain [appearance] background colour. `~` is expanded and symlinks

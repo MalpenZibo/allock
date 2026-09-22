@@ -45,7 +45,7 @@ pub fn create() -> Signal<DateTime<Local>> {
     let now = create_signal(Local::now());
     let writer = now.writer();
 
-    let _ = create_service::<(), _, _>(move |_rx, ctx| async move {
+    create_task(move |ctx| async move {
         while ctx.is_running() {
             let nanos_into_second = Local::now().nanosecond() % 1_000_000_000;
             let until_next_second = 1_000_000_000u32.saturating_sub(nanos_into_second);
@@ -78,14 +78,14 @@ pub fn view(screen: &Screen) -> Container {
 
     let glass = screen.wallpaper().is_some();
 
-    let clock = container()
+    container()
         .layout(
             Flex::column()
                 .spacing(2.0)
                 .cross_alignment(CrossAlignment::Center),
         )
-        // The colour is inherited from the screen root; only the sizes, the
-        // glass and the dimmer date differ from it.
+        // A container draws a box and says nothing about the glyphs inside it,
+        // so every colour here is named where it is drawn.
         .child(frosted(
             text(move || time.get()).font_size(96.0).nowrap().bold(),
             theme.text,
@@ -100,24 +100,20 @@ pub fn view(screen: &Screen) -> Container {
                     glass,
                 )
             })
-        });
-
-    if glass {
-        clock.text_stroke(STROKE)
-    } else {
-        clock
-    }
+        })
 }
 
 /// A text made of glass, or left alone.
 ///
 /// Over the frost the colour arrives at [`TINT`], because the fill is drawn
 /// *over* what the blur put inside the letter and an opaque one would hide it.
-/// Only the colour is the caller's: how much of it survives the glass is the
-/// same everywhere on this clock.
+/// Only the colour is the caller's: how much of it survives the glass, and the
+/// contour that draws its edge, are the same everywhere on this clock.
 fn frosted(text: Text, color: Color, glass: bool) -> Text {
     if glass {
-        text.color(color.with_alpha(TINT)).backdrop_blur(FROST)
+        text.color(color.with_alpha(TINT))
+            .backdrop_blur(FROST)
+            .text_stroke(STROKE)
     } else {
         // Nothing behind it to blur — a blur of a flat colour is that same flat
         // colour — so it goes back to being ordinary text.

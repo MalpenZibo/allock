@@ -5,15 +5,17 @@
 //! Upstream services are state machines pushing `ServiceEvent`s into a
 //! stream built with `Subscription::run_with` + `stream::channel`, plus a
 //! `command()` returning a `Task`. This module provides those exact API
-//! shapes, and [`run_service`] drives them from a guido `create_service`
-//! task: events fold into the service value via `update()`, and every
+//! shapes, and [`run_service`] drives them from a guido service task:
+//! events fold into the service value via `update()`, and every
 //! change is published to a guido signal with `set_always` (services have
 //! no meaningful equality — every publish notifies; memos cut off at the
 //! consumer edge).
 //!
-//! Cancellation is inherited from guido: `create_service` aborts the task
-//! on owner cleanup, and everything here is polled by that task — no
-//! detached loops, no `is_running` polling.
+//! Cancellation is inherited from guido: the task is aborted on owner
+//! cleanup, and everything here is polled by it — no detached loops, no
+//! `is_running` polling. A read-only service only pushes, so it runs on
+//! `create_task`; only the command path needs the channel `create_service`
+//! allocates.
 
 use std::any::TypeId;
 use std::future::Future;
@@ -207,7 +209,7 @@ where
     let signal = create_signal(None::<S>);
     let writer = signal.writer();
 
-    let _svc = create_service::<(), _, _>(move |_rx, _ctx| async move {
+    create_task(move |_ctx| async move {
         let mut events = S::subscribe().0;
         let mut service: Option<S> = None;
         let publish = move |s: S| writer.set_always(Some(s));

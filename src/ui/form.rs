@@ -1,7 +1,6 @@
 //! The login card: who is logging in, the field, and why the last attempt
 //! did not work.
 
-use guido::animation::Keyframes;
 use guido::prelude::*;
 
 use super::Screen;
@@ -19,27 +18,125 @@ const SUBMIT_GLYPH: &str = "\u{f0057}";
 const ACCOUNT_GLYPH: &str = "\u{f0004}";
 /// nf-md-apple_keyboard_caps — the ⇪ every other password field uses.
 const CAPS_LOCK_GLYPH: &str = "\u{f0632}";
+/// nf-fa-circle_o_notch — the open ring that stands in while a check runs.
+///
+/// From the fa- range and not md- like the rest, because the md- spinner
+/// (`md-loading`, `f0772`) is drawn at half the size of every glyph around it
+/// and would come out a third of the ring it replaces. `f1cd` next door is
+/// `fa-support`, a lifebuoy: also a ring, and silently the wrong one.
+///
+/// Its ink is centred on the line box in both axes — 614 units above the
+/// baseline, which is exactly the box's own centre — so it turns in place
+/// rather than orbiting.
+const SPINNER_GLYPH: &str = "\u{f1ce}";
+
+/// How much smaller the spinner is drawn than the glyph it stands in for.
+///
+/// `fa-circle_o_notch` fills 0.906 of its em box against the md- glyphs' 0.832,
+/// so at the same font size its ring would be the larger of the two. This is
+/// that ratio, and it makes the two rings the same size on screen.
+const SPINNER_SCALE: f32 = 0.918;
 
 /// Exact, not a minimum: under the centring column a minimum width grows to
 /// fill the output, and the card grows with it into a full-width band.
 const FIELD_WIDTH: f32 = 360.0;
 const AVATAR_SIZE: f32 = 76.0;
 
+/// Degrees the spinner turns per step of `AuthState::spin`.
+///
+/// The auth task steps twenty-five times a second, so twelve degrees is a turn
+/// every 1.2 seconds: plainly moving, and not in a hurry about a wait it has no
+/// way to shorten.
+const SPIN_STEP: f32 = 12.0;
+
+/// The glyph beside the fingerprint hint, and the spinner that stands in for
+/// it while the sensor is reading.
+const HINT_GLYPH_SIZE: f32 = 15.0;
+
+/// The submit affordance and the spinner that stands in for it.
+const SUBMIT_SIZE: f32 = 18.0;
+
+/// The lift the card is drawn with.
+///
+/// What `elevation(3.0)` used to resolve to in guido's Material table, written
+/// out now that the library ships no ladder: the card is a panel a step above
+/// the wallpaper, not a thing that floats.
+const CARD_SHADOW: Shadow = Shadow::new((0.0, 3.0), 6.0, 0.0, Color::rgba(0.0, 0.0, 0.0, 0.19));
+
+/// The field's frame, base and every state layer over it.
+///
+/// A border is a width and a colour together — a layer that only recolours
+/// still restates the width — so the width lives here and the layers below
+/// name only what they change.
+const FIELD_BORDER: f32 = 1.5;
+
 /// The wobble a refused attempt gets.
 ///
-/// Small angles and a decaying amplitude — the shake of a head saying no, not a
-/// machine falling over. A third of a second: long enough to be seen, short
-/// enough that a second wrong password can start its own before the first is
-/// forgotten. Started again mid-run it restarts, which is what a second refusal
-/// means.
-fn shake() -> Keyframes<Transform> {
+/// Small angles in degrees and a decaying amplitude — the shake of a head
+/// saying no, not a machine falling over. A third of a second: long enough to
+/// be seen, short enough that a second wrong password can start its own before
+/// the first is forgotten. Started again mid-run it restarts, which is what a
+/// second refusal means.
+fn shake() -> Keyframes<f32> {
     Keyframes::new(320.0)
-        .at(0.0, Transform::IDENTITY)
-        .at(0.15, Transform::rotate_degrees(1.2))
-        .at(0.40, Transform::rotate_degrees(-1.2))
-        .at(0.65, Transform::rotate_degrees(0.9))
-        .at(0.85, Transform::rotate_degrees(-0.45))
-        .at(1.0, Transform::IDENTITY)
+        .at(0.0, 0.0)
+        .at(0.15, 1.2)
+        .at(0.40, -1.2)
+        .at(0.65, 0.9)
+        .at(0.85, -0.45)
+        .at(1.0, 0.0)
+}
+
+/// What an affordance shows: `resting` normally, a turning ring while `spin`
+/// says its check is in flight.
+///
+/// Not a keyframe. guido's timelines are finite and play from a trigger, and a
+/// wait has no end it can name. So the angle is stepped instead, by the auth
+/// task, which is the one that knows when the wait starts and when it ends;
+/// this only reads the count as degrees.
+///
+/// The box is pinned to `size` because the two glyphs do not have the same line
+/// box, and the row this sits in takes its height from its tallest child: the
+/// field would otherwise lose a pixel and a half of height every time a
+/// password was checked. The box costs nothing in a baseline row — a container
+/// republishes the baseline of the first child that has one, so the glyph still
+/// sits where the text beside it sits.
+fn turning_glyph<M>(
+    resting: &str,
+    size: f32,
+    color: impl IntoSignal<Color, M>,
+    spin: Option<RwSignal<u32>>,
+) -> Container {
+    let (kind, font_size) = match spin {
+        Some(_) => (SPINNER_GLYPH, size * SPINNER_SCALE),
+        None => (resting, size),
+    };
+    let glyph = container()
+        .height(size)
+        .layout(
+            Flex::column()
+                .main_alignment(MainAlignment::Center)
+                .cross_alignment(CrossAlignment::Center),
+        )
+        .child(
+            icon()
+                .kind(IconKind::from(kind))
+                .font_size(font_size)
+                .color(color),
+        );
+    match spin {
+        Some(spin) => glyph.rotate(
+            // The task steps twenty-five times a second and the screen draws
+            // rather more often than that, so the steps are carried rather than
+            // jumped: the angle eases over exactly one step's worth of time, and
+            // arrives just as the next one is published.
+            (move || spin.get() as f32 * SPIN_STEP).transition(Transition::new(
+                crate::auth::SPIN_PERIOD.as_millis() as f32,
+                TimingFunction::Linear,
+            )),
+        ),
+        None => glyph,
+    }
 }
 
 pub fn view(screen: Screen) -> Container {
@@ -57,13 +154,12 @@ pub fn view(screen: Screen) -> Container {
         .child(fingerprint_hint(&screen));
 
     super::card_surface(&screen)
-        .corner_radius(22.0)
-        .squircle()
-        .elevation(3.0)
-        // Turned about its own centre, which is the default origin. Played by
+        .corners(Corners::squircle(22.0))
+        .shadow(CARD_SHADOW)
+        // Turned about its own centre, which is the default pivot. Played by
         // the count of refused attempts, so the second wrong password shakes as
-        // loudly as the first.
-        .keyframes_transform(shake(), screen.auth.state.rejections)
+        // loudly as the first, and resting at zero in between.
+        .rotate(0.0.timeline(shake().played_by(screen.auth.state.rejections)))
         .layout(ZStack::new())
         .child(content)
 }
@@ -75,7 +171,7 @@ fn avatar(screen: &Screen) -> Container {
     container()
         .width(AVATAR_SIZE)
         .height(AVATAR_SIZE)
-        .corner_radius(AVATAR_SIZE / 2.0)
+        .corners(AVATAR_SIZE / 2.0)
         .background(with_alpha(theme.primary, 0.15))
         .overflow(Overflow::Hidden)
         .layout(
@@ -107,6 +203,7 @@ fn name(screen: &Screen) -> Text {
             .unwrap_or_else(|| "Sign in".to_owned())
     })
     .font_size(21.0)
+    .color(screen.theme.text)
     .nowrap()
 }
 
@@ -141,21 +238,20 @@ fn field(screen: &Screen) -> Container {
 
     container()
         .width(FIELD_WIDTH)
-        .corner_radius(14.0)
-        .squircle()
+        .corners(Corners::squircle(14.0))
         // Inset into the card: a step *down* from it, back towards the
         // backdrop colour, so the field reads as a well rather than another
         // panel.
         .background(with_alpha(theme.background, 0.55))
-        .border(1.5, with_alpha(theme.text, 0.15))
+        .border(FIELD_BORDER, with_alpha(theme.text, 0.15))
         // Three layers over that base, and the order is the ranking: the last
         // one that applies and speaks about the border wins. The ring is
         // declared first because it is the weakest of the three — this field
         // holds the focus essentially all the time, so a ring that outranked
         // the others would be a ring that hid them.
-        .when_focused(|s| s.border(1.5, with_alpha(theme.primary, 0.6)))
-        .state(failed, |s| s.border(1.5, theme.danger))
-        .state(state.busy, |s| s.border(1.5, theme.primary))
+        .when_focused(|s| s.border(FIELD_BORDER, with_alpha(theme.primary, 0.6)))
+        .state(failed, |s| s.border(FIELD_BORDER, theme.danger))
+        .state(state.busy, |s| s.border(FIELD_BORDER, theme.primary))
         .child(
             container()
                 .padding([12.0, 16.0])
@@ -212,20 +308,29 @@ fn submit(screen: &Screen) -> Container {
     container()
         // The glyph is 18px; the padding is what makes it worth aiming at.
         .padding(4.0)
-        .corner_radius(10.0)
+        .corners(10.0)
         .on_click(move || auth.submit())
-        .child(
-            icon()
-                .kind(IconKind::from(SUBMIT_GLYPH))
-                .font_size(18.0)
-                .color(move || {
-                    if state.busy.get() || state.input.get().is_empty() {
-                        with_alpha(theme.text, 0.25)
-                    } else {
+        // The affordance that took the attempt is the one that answers for it:
+        // press the arrow, or Enter, and the arrow is what starts turning. A
+        // second Enter is refused while it does — see `Auth::submit`.
+        .child(move || {
+            let checking = state.busy.get();
+            turning_glyph(
+                SUBMIT_GLYPH,
+                SUBMIT_SIZE,
+                // Read inside, so typing the first character re-tints the arrow
+                // instead of rebuilding it — and not read at all while the ring
+                // turns, which is lit whatever the field holds.
+                move || {
+                    if checking || !state.input.get().is_empty() {
                         theme.primary
+                    } else {
+                        with_alpha(theme.text, 0.25)
                     }
-                }),
-        )
+                },
+                checking.then_some(state.spin),
+            )
+        })
 }
 
 fn notice(screen: &Screen) -> Container {
@@ -238,15 +343,28 @@ fn notice(screen: &Screen) -> Container {
         .height(20.0)
         .layout(Flex::column().main_alignment(MainAlignment::Center))
         .child(move || {
-            state.notice.get().filter(|n| !n.text.is_empty()).map(|n| {
-                text(n.text)
-                    .font_size(13.0)
-                    .color(match n.level {
-                        NoticeLevel::Error => theme.danger,
-                        NoticeLevel::Info => theme.text_weak,
-                    })
-                    .nowrap()
-            })
+            match state.notice.get().filter(|n| !n.text.is_empty()) {
+                Some(n) => Some(
+                    text(n.text)
+                        .font_size(13.0)
+                        .color(match n.level {
+                            NoticeLevel::Error => theme.danger,
+                            NoticeLevel::Info => theme.text_weak,
+                        })
+                        .nowrap(),
+                ),
+                // The line the answer will land on, saying that it is coming.
+                // PAM takes its time over a wrong password on purpose, and an
+                // empty line for those two seconds reads as an Enter that went
+                // nowhere — then the refusal appears out of nothing.
+                None if state.busy.get() => Some(
+                    text("Checking…")
+                        .font_size(13.0)
+                        .color(theme.text_weak)
+                        .nowrap(),
+                ),
+                None => None,
+            }
         })
 }
 
@@ -260,11 +378,16 @@ fn fingerprint_hint(screen: &Screen) -> Container {
             return None;
         }
 
+        let reading = fingerprint == FingerprintState::Reading;
         let (message, color) = match &fingerprint {
             FingerprintState::Waiting => (
                 "Or touch the fingerprint sensor".to_owned(),
                 theme.text_weak,
             ),
+            // fprintd says nothing between the touch and the verdict except
+            // `finger-present`, and this is what allock does with it: the
+            // sensor stops asking and starts answering.
+            FingerprintState::Reading => ("Checking your fingerprint…".to_owned(), theme.primary),
             FingerprintState::Retry(hint) => (hint.clone(), theme.warning),
             // The reader has stopped answering, and the screen has to say so —
             // silence reads as a broken sensor.
@@ -282,12 +405,14 @@ fn fingerprint_hint(screen: &Screen) -> Container {
                         .spacing(7.0)
                         .cross_alignment(CrossAlignment::Baseline),
                 )
-                .child(
-                    icon()
-                        .kind(IconKind::from(FINGERPRINT_GLYPH))
-                        .font_size(15.0)
-                        .color(color),
-                )
+                // The same swap the submit arrow makes, for the same reason:
+                // the touch is answered where the touch was invited.
+                .child(turning_glyph(
+                    FINGERPRINT_GLYPH,
+                    HINT_GLYPH_SIZE,
+                    color,
+                    reading.then_some(state.spin),
+                ))
                 .child(text(message).font_size(13.0).color(color).nowrap()),
         )
     })

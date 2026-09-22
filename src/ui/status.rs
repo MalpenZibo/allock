@@ -11,9 +11,9 @@ use crate::services::upower::BatteryStatus;
 /// font's cmap; `f0a3a` next door is `md-comment_eye`.
 const SESSION_GLYPH: &str = "\u{f0a07}";
 
-/// `shows_form` keeps the session picker on the screen the user is typing on;
-/// a secondary monitor showing only the clock has nothing to pick with.
-pub fn view(screen: Screen, shows_form: bool) -> Container {
+/// Only built on the outputs carrying the interface, so the session picker is
+/// always on a screen the user is typing on.
+pub fn view(screen: Screen) -> Container {
     container()
         .width(fill())
         .layout(
@@ -21,7 +21,7 @@ pub fn view(screen: Screen, shows_form: bool) -> Container {
                 .spacing(10.0)
                 .cross_alignment(CrossAlignment::Center),
         )
-        .maybe_child((shows_form && screen.mode == Mode::Greeter).then(|| session_picker(&screen)))
+        .child((screen.mode == Mode::Greeter).then(|| session_picker(&screen)))
         // An explicit spacer rather than SpaceBetween: with the picker absent
         // — which is every lock-mode screen — SpaceBetween has one child to
         // place and would leave the battery on the left.
@@ -59,8 +59,7 @@ fn battery(screen: &Screen) -> Container {
 
         Some(
             super::card_surface(&screen)
-                .corner_radius(32.0)
-                .squircle()
+                .corners(Corners::squircle(32.0))
                 .child(
                     container()
                         .padding([12.0, 24.0])
@@ -104,8 +103,7 @@ fn session_picker(screen: &Screen) -> Container {
     let single = count == 1;
 
     let button = super::card_surface(screen)
-        .corner_radius(16.0)
-        .squircle()
+        .corners(Corners::squircle(16.0))
         .child(
             container()
                 .padding([8.0, 14.0])
@@ -123,6 +121,7 @@ fn session_picker(screen: &Screen) -> Container {
                 .child(
                     text(move || names.get(index.get() % count).cloned().unwrap_or_default())
                         .font_size(15.0)
+                        .color(theme.text)
                         .nowrap(),
                 ),
         );

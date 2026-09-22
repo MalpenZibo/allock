@@ -1,10 +1,15 @@
 //! The lock screen, one instance per output.
 //!
 //! Every output gets a surface — the session-lock protocol requires it — but
-//! only the outputs selected by `form_outputs` draw the login form; the rest
-//! show the clock over the same background. All of them read the same
-//! signals, so the form mirrors itself across screens: whichever surface has
-//! keyboard focus drives the shared input buffer.
+//! only the outputs selected by `main_output` draw the interface on top of it;
+//! the rest show the background alone. All of them read the same signals, so
+//! with more than one selected the form mirrors itself across screens:
+//! whichever surface has keyboard focus drives the shared input buffer.
+//!
+//! The selection is a memo over the output list rather than a decision taken
+//! when the surface is built, so unplugging the monitor named in the config
+//! moves the controls to the one standing in for it instead of leaving them
+//! on a screen that is no longer there.
 
 pub mod clock;
 pub mod form;
@@ -47,30 +52,41 @@ impl Screen {
 
 pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
     let theme = screen.theme;
-    let shows_form = screen.config.form_outputs.matches(
-        output.name.as_deref().unwrap_or(""),
-        &output.make,
-        &output.model,
-    );
+    let shows_controls = shows_controls(&screen, output.id);
 
     let centre = container()
         .width(fill())
         .height(fill())
         .layout(
             Flex::column()
-                .spacing(48.0)
                 .main_alignment(MainAlignment::Center)
                 .cross_alignment(CrossAlignment::Center),
         )
-        .child(clock::view(&screen))
-        .maybe_child(shows_form.then(|| form::view(screen.clone())));
+        .child({
+            let screen = screen.clone();
+            move || {
+                shows_controls.get().then(|| {
+                    container()
+                        .layout(
+                            Flex::column()
+                                .spacing(48.0)
+                                .cross_alignment(CrossAlignment::Center),
+                        )
+                        .child(clock::view(&screen))
+                        .child(form::view(screen.clone()))
+                })
+            }
+        });
 
     let bottom = container()
         .width(fill())
         .height(fill())
         .padding(28.0)
         .layout(Flex::column().main_alignment(MainAlignment::End))
-        .child(status::view(screen.clone(), shows_form));
+        .child({
+            let screen = screen.clone();
+            move || shows_controls.get().then(|| status::view(screen.clone()))
+        });
 
     let root = container()
         .width(fill())
@@ -78,16 +94,43 @@ pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
         // Painted under the wallpaper so a missing or half-loaded image never
         // shows through to a transparent surface.
         .background(theme.background)
-        // Declared once for the whole screen: text style is inherited per
-        // property, so the parts below only name the colours that differ.
-        .text_color(theme.text)
         .layout(ZStack::new())
-        .maybe_child(background_image(&screen))
-        .maybe_child(scrim(&screen))
+        .child(background_image(&screen))
+        .child(scrim(&screen))
         .child(centre)
         .child(bottom);
 
     attach_keys(root, screen)
+}
+
+/// Whether this output is one of the ones drawing the interface, as a tracked
+/// read of the output list.
+///
+/// The list is what the rule is written against — "the first output stands in
+/// when nothing named is connected" is a statement about all of them, not
+/// about this one — so each surface finds its own place in the current list
+/// and asks from there. Every surface asks the same question of the same list,
+/// which is what makes exactly one of them the stand-in.
+fn shows_controls(screen: &Screen, output: OutputId) -> Memo<bool> {
+    let selector = screen.config.main_output.clone();
+    create_memo(move || {
+        let connected = outputs().get();
+        let Some(index) = connected.iter().position(|info| info.id == output) else {
+            // This surface's own output is gone; the surface is going with it.
+            return false;
+        };
+        let described: Vec<(&str, &str, &str)> = connected
+            .iter()
+            .map(|info| {
+                (
+                    info.name.as_deref().unwrap_or(""),
+                    info.make.as_str(),
+                    info.model.as_str(),
+                )
+            })
+            .collect();
+        selector.selects(index, &described)
+    })
 }
 
 /// The two keys the field does not want.

@@ -25,10 +25,10 @@ pub struct Config {
     /// Where to import `[appearance]` from. `None` (or a missing file) keeps
     /// allock's built-in ashell-flavoured defaults.
     pub ashell_config: Option<String>,
-    /// Which outputs show the login form. Every output is always covered by a
-    /// lock surface — this only decides where the form is drawn; the others
-    /// get the clock alone.
-    pub form_outputs: Outputs,
+    /// Which outputs draw the interface — clock, login card, status row.
+    /// Every output is always covered by a lock surface showing the
+    /// background; this only decides which of them carry the controls.
+    pub main_output: Outputs,
     pub background: BackgroundConfig,
     pub clock: ClockConfig,
     pub auth: AuthConfig,
@@ -42,7 +42,7 @@ impl Default for Config {
         Self {
             log_level: "warn".to_owned(),
             ashell_config: Some("~/.config/ashell/config.toml".to_owned()),
-            form_outputs: Outputs::default(),
+            main_output: Outputs::default(),
             background: BackgroundConfig::default(),
             clock: ClockConfig::default(),
             auth: AuthConfig::default(),
@@ -77,6 +77,31 @@ impl Outputs {
                     .any(|t| name == t.as_str() || description.contains(t))
             }
         }
+    }
+
+    /// Whether the output at `index` is one of the selected ones, given every
+    /// connected output described as `(name, make, model)` in the order the
+    /// compositor advertised them.
+    ///
+    /// `All` selects all of them. `Targets` selects each one it names, and
+    /// every one it names may be missing: a monitor unplugged while the screen
+    /// is locked, or one that was never there. The controls then fall back to
+    /// the first output, because a lock screen whose password field is on no
+    /// screen at all is a lock screen you cannot get out of.
+    pub fn selects(&self, index: usize, all: &[(&str, &str, &str)]) -> bool {
+        let Some(&(name, make, model)) = all.get(index) else {
+            return false;
+        };
+        if self.matches(name, make, model) {
+            return true;
+        }
+        // Not named — and nothing else is either, so this one stands in if it
+        // is the first. Every surface runs this over the same list, so exactly
+        // one of them says yes.
+        index == 0
+            && !all
+                .iter()
+                .any(|&(name, make, model)| self.matches(name, make, model))
     }
 }
 
@@ -601,5 +626,75 @@ mod tests {
         assert!(outputs.matches("DP-2", "Dell Inc.", "U2720Q"));
         assert!(!outputs.matches("HDMI-A-1", "Acme", "X"));
         assert!(Outputs::All.matches("anything", "", ""));
+    }
+
+    #[test]
+    fn main_output_reads_both_shapes() {
+        // The key and its two spellings are the user-facing contract; a typo
+        // here would fall back to the defaults with only a log line to say so.
+        let all: Config = toml::from_str(r#"main_output = "All""#).unwrap();
+        assert_eq!(all.main_output, Outputs::All);
+
+        let targets: Config = toml::from_str(r#"main_output = { Targets = ["DP-2"] }"#).unwrap();
+        assert_eq!(
+            targets.main_output,
+            Outputs::Targets(vec!["DP-2".to_owned()])
+        );
+
+        assert_eq!(Config::default().main_output, Outputs::All);
+    }
+
+    const LAPTOP: (&str, &str, &str) = ("eDP-1", "BOE", "0x0BCA");
+    const DESK: (&str, &str, &str) = ("DP-2", "Dell Inc.", "U2720Q");
+    const TV: (&str, &str, &str) = ("HDMI-A-1", "Acme", "X");
+
+    #[test]
+    fn all_selects_every_output() {
+        let all = [LAPTOP, DESK];
+        assert!(Outputs::All.selects(0, &all));
+        assert!(Outputs::All.selects(1, &all));
+    }
+
+    #[test]
+    fn targets_select_every_match_and_nothing_else() {
+        let outputs = Outputs::Targets(vec!["DP-2".into()]);
+        let all = [LAPTOP, DESK, TV];
+        assert!(!outputs.selects(0, &all));
+        assert!(outputs.selects(1, &all));
+        assert!(!outputs.selects(2, &all));
+    }
+
+    #[test]
+    fn several_targets_mirror() {
+        let outputs = Outputs::Targets(vec!["DP-2".into(), "eDP-1".into()]);
+        let all = [LAPTOP, DESK, TV];
+        assert!(outputs.selects(0, &all));
+        assert!(outputs.selects(1, &all));
+        assert!(!outputs.selects(2, &all));
+    }
+
+    #[test]
+    fn the_first_output_stands_in_for_a_target_that_is_not_there() {
+        // The monitor named in the config was unplugged, or never arrived.
+        let outputs = Outputs::Targets(vec!["DP-2".into()]);
+        let all = [LAPTOP, TV];
+        assert!(outputs.selects(0, &all));
+        assert!(!outputs.selects(1, &all));
+    }
+
+    #[test]
+    fn the_stand_in_steps_aside_when_the_target_comes_back() {
+        let outputs = Outputs::Targets(vec!["DP-2".into()]);
+        // Hotplugged back in, appended to the list it left.
+        let all = [LAPTOP, TV, DESK];
+        assert!(!outputs.selects(0, &all));
+        assert!(outputs.selects(2, &all));
+    }
+
+    #[test]
+    fn an_output_that_is_gone_selects_nothing() {
+        let all: [(&str, &str, &str); 0] = [];
+        assert!(!Outputs::All.selects(0, &all));
+        assert!(!Outputs::Targets(vec!["DP-2".into()]).selects(0, &all));
     }
 }

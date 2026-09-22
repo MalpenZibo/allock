@@ -59,6 +59,26 @@ optional. The `[appearance]` table is read from
 `~/.config/ashell/config.toml` and merged key by key with any `[appearance]`
 you put in allock's own file, so overriding one colour keeps the rest.
 
+### Which monitor gets the controls
+
+Every monitor is always covered and always shows the background — the
+session-lock protocol requires the surface, and a screen left uncovered while
+the session is locked is a screen showing what you locked. What `main_output`
+decides is which of them draw the clock, the login card and the status row on
+top of it:
+
+```toml
+main_output = "All"                    # every screen (the default)
+main_output = { Targets = ["DP-2"] }   # connector name, or an EDID substring
+```
+
+Name more than one and each match mirrors the form, sharing the same input
+buffer — whichever screen holds the keyboard is the one typing. Name a monitor
+that is not connected, or unplug it while the screen is locked, and the
+controls move to the first output rather than staying on a screen that is no
+longer there: a password field nobody can see is a session nobody can unlock.
+It moves back when the monitor returns.
+
 ## Lock mode
 
 ```sh
@@ -98,8 +118,9 @@ always at the end, so the caret says nothing — and it would be the one thing a
 still lock screen redraws on its own, twice a second, all night. What says where
 the keys are going is the border: it lights up while the field holds the
 keyboard, and steps aside for the colour of a failed attempt, which has more to
-say. With two monitors that is the whole answer to which screen is listening —
-both draw the form, one has the focus.
+say. With two monitors both drawing the form — the default `main_output`, see
+[above](#which-monitor-gets-the-controls) — that is the whole answer to which
+screen is listening: both draw it, one has the focus.
 
 Pasting *into* the field works; nothing can copy out of it. Blocking paste is
 what banking sites are mocked for — it stops password managers, not attackers —

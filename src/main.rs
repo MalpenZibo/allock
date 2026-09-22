@@ -140,7 +140,7 @@ async fn main() {
     // which is ugly but never blocks logging in.
     let mut app = App::new();
     if let Some(family) = &config.appearance.font_name {
-        app = app.default_font_family(FontFamily::Name(family.clone()));
+        app = app.default_font_family(FontFamily::name(family));
     }
 
     let config = Rc::new(config);
@@ -219,8 +219,7 @@ fn run_pam_screen(
                 log::info!("authenticated; preview has nothing to unlock, exiting");
                 quit_app();
             }
-        })
-        .detach();
+        });
         return;
     }
 
@@ -233,8 +232,7 @@ fn run_pam_screen(
             log::info!("authenticated, unlocking");
             unlock_session();
         }
-    })
-    .detach();
+    });
 
     watch_lock_lifecycle();
 }
@@ -276,8 +274,7 @@ fn watch_lock_lifecycle() {
             }
             (Progress::Pending, LockState::Unlocked) => {}
         }
-    })
-    .detach();
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -344,8 +341,7 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
                 filled.set(true);
                 state.input.set(name.clone());
             }
-        })
-        .detach();
+        });
     }
 
     // The username step answers a visible prompt; showing who is signing in
@@ -355,8 +351,7 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         if let Some(name) = auth.state.visible_answer.get() {
             user_signal.set(user::by_name(&name));
         }
-    })
-    .detach();
+    });
 
     // Authenticated: hand greetd the session to launch. greetd replaces the
     // greeter with it, so there is nothing to do afterwards.
@@ -382,8 +377,7 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
             last_login::save(user.as_deref(), &session.name);
         }
         auth.start_session(session.command.clone(), session.env.clone());
-    })
-    .detach();
+    });
 
     // Exclusive: the greeter owns the machine, nothing else may take the
     // keyboard from it.
@@ -430,8 +424,7 @@ fn spawn_fullscreen_surfaces(screen: Screen, keyboard: KeyboardInteractivity) {
             }
             connected
         });
-    })
-    .detach();
+    });
 }
 
 // ---------------------------------------------------------------------------

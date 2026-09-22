@@ -16,6 +16,8 @@ pub mod fingerprint;
 pub mod greetd;
 pub mod pam;
 
+use std::time::Duration;
+
 use guido::prelude::*;
 use tokio::sync::mpsc;
 
@@ -43,6 +45,13 @@ pub enum AuthEvent {
     /// screen is not already saying. The fingerprint reader's no-match: the
     /// hint beside the sensor covers the words, this covers the fact.
     Rejected,
+    /// A finger is on the sensor, or has just left it.
+    ///
+    /// Not a step of the conversation — the reader runs beside it — but the
+    /// screen shows a scan the same way it shows a submitted password, and
+    /// the tick that turns the spinner lives in the loop below. The reader
+    /// owns the words next to the sensor; this is the fact the loop needs.
+    Scanning(bool),
     /// The backend is gone and will ask nothing more.
     Ended(String),
 }
@@ -99,6 +108,8 @@ pub enum FingerprintState {
     Unavailable,
     /// Waiting for a finger.
     Waiting,
+    /// A finger is on the sensor and the reader is deciding.
+    Reading,
     /// The last scan was unusable — `String` is fprintd's reason, already
     /// turned into something a human can act on.
     Retry(String),
@@ -120,6 +131,11 @@ pub struct AuthState {
     /// equal notifies nobody — the second wrong password has to be as loud as
     /// the first.
     pub rejections: RwSignal<u32>,
+    /// Advances while something is being checked — a submitted answer, or a
+    /// finger on the sensor. The screen reads it as an angle, so a count is
+    /// all it has to be; it runs only between the attempt and its answer, and
+    /// a screen at rest never moves it.
+    pub spin: RwSignal<u32>,
     /// Set only by [`AuthEvent::Success`].
     pub authenticated: RwSignal<bool>,
     pub fingerprint: RwSignal<FingerprintState>,
@@ -139,6 +155,7 @@ impl AuthState {
             busy: create_signal(false),
             notice: create_signal(None),
             rejections: create_signal(0),
+            spin: create_signal(0),
             authenticated: create_signal(false),
             fingerprint: create_signal(FingerprintState::default()),
             input: create_signal(String::new()),
@@ -203,6 +220,15 @@ impl Auth {
 // Runner
 // ---------------------------------------------------------------------------
 
+/// How often [`AuthState::spin`] steps while a check is in flight.
+///
+/// Twenty-five steps a second, which is smooth enough for something the size
+/// of the glyph it turns, and it runs in the one window where the screen has
+/// nothing else to say — between an attempt and its answer. Outside that
+/// window the branch that drives it is disabled, so a lock screen left alone
+/// all night never wakes for it.
+pub const SPIN_PERIOD: Duration = Duration::from_millis(40);
+
 /// Fingerprint verification settings, when it should run at all.
 #[derive(Clone, Debug)]
 pub struct FingerprintConfig {
@@ -222,6 +248,7 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let busy_w = state.busy.writer();
     let notice_w = state.notice.writer();
     let rejections_w = state.rejections.writer();
+    let spin_w = state.spin.writer();
     let authenticated_w = state.authenticated.writer();
     let fingerprint_w = state.fingerprint.writer();
     let input_w = state.input.writer();
@@ -250,11 +277,23 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
         // from a signal a background task has no business reading.
         let mut rejections = 0u32;
 
+        // What the spinner turns for. `answering` mirrors `busy` from the side
+        // that knows when the answer comes back, and `scanning` is the reader's
+        // finger; either one means the screen is waiting on something, and
+        // neither one is a signal this task may read.
+        let mut answering = false;
+        let mut scanning = false;
+        let mut spin = 0u32;
+
         loop {
             tokio::select! {
                 Some(command) = ui_rx.recv() => {
+                    // Only an answer is waited on: a restart abandons the
+                    // attempt, and a session launch replaces us with it.
+                    answering = matches!(command, AuthCommand::Respond(_));
                     if cmd_tx.send(command).await.is_err() {
                         log::error!("auth backend is not accepting commands");
+                        answering = false;
                         busy_w.set(false);
                         notice_w.set(Some(Notice {
                             level: NoticeLevel::Error,
@@ -267,6 +306,7 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                     match event {
                         AuthEvent::Prompt { secret, message } => {
                             input_w.set(String::new());
+                            answering = false;
                             busy_w.set(false);
                             prompt_w.set(Some(Prompt { secret, message }));
                         }
@@ -278,6 +318,7 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                         }
                         AuthEvent::Failed(text) => {
                             input_w.set(String::new());
+                            answering = false;
                             busy_w.set(false);
                             notice_w.set(Some(Notice { level: NoticeLevel::Error, text }));
                             rejections += 1;
@@ -287,24 +328,39 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                             rejections += 1;
                             rejections_w.set(rejections);
                         }
+                        AuthEvent::Scanning(on) => scanning = on,
                         // The one place the screen is allowed to open.
                         AuthEvent::Success => {
                             input_w.set(String::new());
+                            answering = false;
+                            scanning = false;
                             busy_w.set(false);
                             notice_w.set(None);
                             authenticated_w.set(true);
                         }
                         AuthEvent::Ended(text) => {
+                            answering = false;
                             busy_w.set(false);
                             notice_w.set(Some(Notice { level: NoticeLevel::Error, text }));
                         }
                     }
                 }
-                Some(()) = readers.next() => {}
+                // The reader has stopped, so there is no finger it could be
+                // reading — including the match that ends it mid-scan.
+                Some(()) = readers.next() => scanning = false,
+                // One step of the spinner, for as long as something is being
+                // checked. A fresh sleep per iteration is right here: the other
+                // branches are silent while we wait, and an event that does
+                // arrive ends the wait it would have restarted.
+                _ = tokio::time::sleep(SPIN_PERIOD), if answering || scanning => {
+                    spin = spin.wrapping_add(1);
+                    spin_w.set(spin);
+                }
                 _ = &mut conversation, if !conversation_done => {
                     conversation_done = true;
                     // Fail closed: the conversation is over and it was not a
                     // success, so no further answer can ever be accepted.
+                    answering = false;
                     busy_w.set(false);
                     notice_w.set(Some(Notice {
                         level: NoticeLevel::Error,
