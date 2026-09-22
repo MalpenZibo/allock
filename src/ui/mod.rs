@@ -41,6 +41,10 @@ pub struct Screen {
     pub battery: Option<RwSignal<Option<UPowerService>>>,
     pub sessions: Rc<Vec<SessionDef>>,
     pub session_index: RwSignal<usize>,
+    /// Which way the picker last stepped: `1` for next, `-1` for previous.
+    /// Only the slide reads it — with two sessions both arrows land on the
+    /// same index, so the index alone cannot say which way to move.
+    pub session_step: RwSignal<isize>,
     pub now: Signal<DateTime<Local>>,
 }
 
@@ -100,7 +104,29 @@ pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
         .child(centre)
         .child(bottom);
 
+    let root = if screen.mode == Mode::Greeter {
+        show_pointer(root)
+    } else {
+        root
+    };
     attach_keys(root, screen)
+}
+
+/// Give the pointer a shape when it arrives, so the greeter has a cursor.
+///
+/// A Wayland client that sets no shape on enter gets no cursor at all, and
+/// guido only sends one when the shape *changes* — never on enter. That is
+/// what keeps the lock screen cursorless, and it stays that way there. The
+/// greeter wants one, and asking for `Default` alone would be dropped as no
+/// change, so it goes through another shape first: both land in the same
+/// pass, and only the last one reaches the compositor.
+fn show_pointer(root: Container) -> Container {
+    root.on_hover(|inside| {
+        if inside {
+            set_cursor(CursorIcon::Text);
+            set_cursor(CursorIcon::Default);
+        }
+    })
 }
 
 /// Whether this output is one of the ones drawing the interface, as a tracked
