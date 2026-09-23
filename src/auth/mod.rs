@@ -61,6 +61,9 @@ pub enum AuthCommand {
         command: Vec<String>,
         env: Vec<String>,
     },
+    /// Greeter only: authenticate this account instead, abandoning the attempt
+    /// in flight. `None` is "Other…": ask for the name in the form.
+    SetUser(Option<String>),
 }
 
 /// Which conversation drives this run.
@@ -199,6 +202,18 @@ impl Auth {
         self.state.busy.set(false);
         self.state.notice.set(None);
         self.service.send(AuthCommand::Restart);
+    }
+
+    /// Greeter only: sign in as `user` instead, or ask for the name (`None`).
+    ///
+    /// Whatever was typed belongs to the attempt being abandoned — a password
+    /// for the previous account, most likely — so it goes with it.
+    pub fn set_user(&self, user: Option<String>) {
+        self.state.input.set(String::new());
+        self.state.busy.set(false);
+        self.state.notice.set(None);
+        self.state.visible_answer.set(None);
+        self.service.send(AuthCommand::SetUser(user));
     }
 
     pub fn start_session(&self, command: Vec<String>, env: Vec<String>) {

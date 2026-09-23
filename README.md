@@ -159,9 +159,12 @@ Point greetd at it in `/etc/greetd/config.toml`, inside a compositor:
 
 ```toml
 [default_session]
-command = "niri -c /etc/greetd/allock-niri.kdl"
+command = "systemd-cat -t allock-greeter niri -c /etc/greetd/allock-niri.kdl"
 user = "greeter"
 ```
+
+`systemd-cat` keeps niri's log off the console, where greetd would otherwise
+print it on the greeter's VT.
 
 …with the greeter compositor spawning `allock --greeter -c /etc/greetd/allock.toml`
 and quitting once allock exits: greetd starts the session only after the
@@ -177,19 +180,30 @@ would accept.
 
 ### What it remembers
 
+The account is chosen in a user picker, like the session: the accounts people
+log in to (a uid in `UID_MIN..UID_MAX` and a login shell), then "Other…", which
+asks for the name. So the password field only ever receives a password — typed
+into a user-name field, a password ends up in the system journal as a "bad
+username". `[greeter] other_user = false` drops "Other…" where every account is
+listed; with nobody listed the greeter asks for the name regardless.
+
 After a successful login the greeter notes the account and the session in
 `$XDG_CACHE_HOME/allock/last-login.toml` (the `greeter` user's own cache, since
-that is who it runs as) and starts there next time. Both are suggestions: the
-session is preselected in a picker that still cycles, and the name is *typed
-into the field* rather than handed to greetd, so anybody else can clear it and
-sign in — a greeter must not be able to remember its way into locking an
-account out. The session is stored by name, so installing a new one does not
-shift the choice. `[greeter] remember = false` leaves nothing on disk to read
-or to write.
+that is who it runs as) and starts there next time. Both are suggestions the
+pickers can change, so a greeter can never remember its way into keeping
+somebody else out. The session is stored by name, so installing a new one does
+not shift the choice. `[greeter] default_session = "Niri"` preselects a session
+every time instead, and `[greeter] user` an account; `remember = false` leaves
+nothing on disk to read or to write.
+
+The session picker is not drawn with only one session: there is nothing to
+choose.
 
 ## What it shows
 
-User (GECOS name, `~/.face` avatar if present), clock and date, the password
+User (GECOS name; `~/.face` avatar if present, or
+`/var/lib/AccountsService/icons/<user>` where the greeter cannot read your
+home), clock and date, the password
 field with the backend's own prompt, why the last attempt failed, the
 fingerprint hint, and the battery. In greeter mode, a session picker.
 

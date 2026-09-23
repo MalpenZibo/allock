@@ -2,25 +2,10 @@
 
 use guido::prelude::*;
 
-use super::Screen;
+use super::{Screen, picker};
 use crate::Mode;
-use crate::components::icons::{StaticIcon, icon};
+use crate::components::icons::icon;
 use crate::services::upower::BatteryStatus;
-
-/// Exact, for the reason the field's width is: the window the names slide
-/// through has to stay put while they do, or the arrows either side of it
-/// would jump with every name. A name too long for it wraps.
-const SESSION_LABEL_WIDTH: f32 = 200.0;
-
-/// The padding around a session name inside its window.
-const LABEL_PADDING: [f32; 2] = [8.0, 14.0];
-const LABEL_FONT_SIZE: f32 = 15.0;
-
-/// The round buttons either side of the name.
-const ARROW_SIZE: f32 = 36.0;
-
-/// How long a name takes to cross the window.
-const SLIDE_MS: f32 = 260.0;
 
 /// Only built on the outputs carrying the interface, so the session picker is
 /// always on a screen the user is typing on.
@@ -37,7 +22,11 @@ pub fn view(screen: Screen) -> Container {
         // middle of whatever the battery leaves over. With the picker absent —
         // every lock-mode screen — they still push the battery to the right.
         .child(container().width(fill()))
-        .child((screen.mode == Mode::Greeter).then(|| session_picker(&screen)))
+        .child(
+            (screen.mode == Mode::Greeter)
+                .then(|| session_picker(&screen))
+                .flatten(),
+        )
         .child(
             container()
                 .width(fill())
@@ -101,130 +90,21 @@ fn battery(screen: &Screen) -> Container {
     })
 }
 
-/// The chosen session's name between a previous and a next arrow.
+/// The session to start, between a previous and a next arrow.
 ///
-/// A popup menu would be the richer answer, but the greeter runs before
-/// anything else exists and the list is normally two or three entries — a
-/// name you step through keeps the whole thing legible.
-///
-/// Stepping slides the old name out and the new one in from the side the
-/// arrow points to, so the list reads as a strip seen through a window.
-fn session_picker(screen: &Screen) -> Container {
-    let sessions = screen.sessions.clone();
-    let index = screen.session_index;
-    let step = screen.session_step;
-
-    if sessions.is_empty() {
-        return container();
-    }
-
-    let count = sessions.len();
-    let names: Vec<String> = sessions.iter().map(|s| s.name.clone()).collect();
-
-    let label = session_label(screen, names, index, step);
-    if count == 1 {
-        // Nothing to step to: keep the name, drop the arrows.
-        return label;
-    }
-
-    let go = move |by: isize| {
-        // The direction first: the label rebuilds on the index, and both the
-        // name arriving and the one leaving read the direction as it does.
-        step.set(by);
-        index.update(|i| *i = (*i as isize + by).rem_euclid(count as isize) as usize);
-    };
-
-    container()
-        .layout(
-            Flex::row()
-                .spacing(12.0)
-                .cross_alignment(CrossAlignment::Center),
+/// Not drawn at all with one session or none: there is nothing to choose, and
+/// the one there is starts anyway.
+fn session_picker(screen: &Screen) -> Option<Container> {
+    let sessions = &screen.sessions;
+    (sessions.len() > 1).then(|| {
+        let names = sessions.iter().map(|s| s.name.clone()).collect();
+        // Never held: the session is read only once the password is accepted.
+        picker::view(
+            screen,
+            names,
+            screen.session,
+            picker::Look::Card,
+            false.into_signal(),
         )
-        .child(arrow(screen, StaticIcon::LeftChevron, move || go(-1)))
-        .child(label)
-        .child(arrow(screen, StaticIcon::RightChevron, move || go(1)))
-}
-
-/// The window the names slide through.
-///
-/// A fixed width, and as tall as the name that wraps onto the most lines:
-/// every name is drawn invisibly behind the visible one, which fills the box
-/// they make. Every label is then the same size, and nothing around the picker
-/// moves while the names change.
-///
-/// Rebuilt on every change of the index. The new name enters from the side
-/// the arrow points to and the old one leaves by the other, both by their own
-/// width and both clipped by the card; a name still leaving when the next
-/// step comes finishes from where it is. `step` is `0` until the first step,
-/// so the first name enters from where it rests: it simply sits there.
-///
-/// The direction comes from `step` rather than from comparing indices,
-/// because with two sessions next and previous land on the same one.
-fn session_label(
-    screen: &Screen,
-    names: Vec<String>,
-    index: RwSignal<usize>,
-    step: RwSignal<isize>,
-) -> Container {
-    let theme = screen.theme;
-    let count = names.len();
-
-    let line = |name: &str, color: Color| {
-        text(name.to_owned())
-            .font_size(LABEL_FONT_SIZE)
-            .color(color)
-            .align(TextAlign::Center)
-    };
-
-    let name = move |i: usize| {
-        let slide = Transition::new(SLIDE_MS, TimingFunction::EaseInOut);
-        let arriving = step.get_untracked() as f32;
-        names
-            .iter()
-            .fold(
-                container()
-                    .width(SESSION_LABEL_WIDTH)
-                    .padding(LABEL_PADDING)
-                    .layout(ZStack::new()),
-                |label, name| label.child(line(name, Color::TRANSPARENT)),
-            )
-            .child(
-                container()
-                    .width(fill())
-                    .height(fill())
-                    .layout(Flex::column().center())
-                    .child(line(&names[i], theme.text)),
-            )
-            .translate(
-                Translate::NONE
-                    .transition(slide)
-                    .entering_from(Translate::relative(arriving, 0.0))
-                    // Read when the name is removed, so it leaves the way the
-                    // step that replaced it went.
-                    .exiting_to(move || Translate::relative(-step.get() as f32, 0.0)),
-            )
-    };
-
-    super::card_surface(screen)
-        .corners(Corners::squircle(16.0))
-        .child(move || name(index.get() % count))
-}
-
-fn arrow(screen: &Screen, glyph: StaticIcon, on_click: impl Fn() + 'static) -> Container {
-    let theme = screen.theme;
-    super::card_surface(screen)
-        .width(ARROW_SIZE)
-        .height(ARROW_SIZE)
-        .corners(ARROW_SIZE / 2.0)
-        .child(
-            container()
-                .width(fill())
-                .height(fill())
-                .layout(Flex::column().center())
-                .child(icon().kind(glyph).font_size(18.0).color(theme.text)),
-        )
-        .when_hovered(|s| s.lighter(0.08))
-        .when_pressed(|s| s.ripple())
-        .cursor(CursorIcon::Pointer)
-        .on_click(on_click)
+    })
 }

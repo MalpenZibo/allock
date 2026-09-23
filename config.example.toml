@@ -61,15 +61,33 @@ battery = true
 # --- greeter mode only (allock --greeter) ----------------------------------
 
 [greeter]
-# Preselected account. Omit or leave empty to have the form ask for it first.
+# The user picker lists the accounts in /etc/passwd with a uid in
+# UID_MIN..UID_MAX (/etc/login.defs) and a login shell, then "Other…", which
+# asks for the name. The password field only ever asks for a password.
+
+# Offer "Other…" for an account the list does not have (a network directory,
+# systemd-homed). Off, only listed accounts can sign in from the greeter —
+# unless nobody is listed, when it asks for the name anyway.
+other_user = true
+
+# Preselected account, over the remembered one. Must be one the picker lists.
 # user = "zibo"
 
+# Preselected session, by name (any case), over the remembered one. Without
+# it the picker starts on the last session used.
+# default_session = "Niri"
+
 # Start on the last account and session that signed in successfully, kept in
-# $XDG_CACHE_HOME/allock/last-login.toml. The name is typed into the field for
-# you, so somebody else can still clear it and sign in. Off leaves nothing on
-# disk to read or to write — on a shared machine the last user name is a hint
-# about who uses it.
+# $XDG_CACHE_HOME/allock/last-login.toml. Both stay suggestions the pickers
+# can change. Off leaves nothing on disk to read or to write — on a shared
+# machine the last user name is a hint about who uses it.
 remember = true
+
+# Where a started session prints until its desktop is up. "Journal" runs it
+# through systemd-cat (`journalctl -t niri-session`), so start scripts' output —
+# niri-session's systemctl warning, say — does not flash on the console between
+# the greeter and the desktop. "Console" leaves it on the VT, as greetd does.
+session_output = "Journal"
 
 # Sessions offered by the picker. With none listed, allock scans
 # /usr/share/wayland-sessions and /usr/share/xsessions.

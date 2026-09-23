@@ -37,6 +37,18 @@ impl LastLogin {
     }
 }
 
+/// The session the picker starts on: the configured default when a session
+/// has that name (in any case), else the remembered one, else the first.
+pub fn preselect(sessions: &[SessionDef], default: Option<&str>, last: &LastLogin) -> usize {
+    default
+        .and_then(|name| {
+            sessions
+                .iter()
+                .position(|session| session.name.eq_ignore_ascii_case(name.trim()))
+        })
+        .unwrap_or_else(|| last.session_index(sessions))
+}
+
 pub fn load() -> LastLogin {
     path().map(|path| read(&path)).unwrap_or_default()
 }
@@ -175,5 +187,18 @@ mod tests {
         };
 
         assert_eq!(last.session_index(&[]), 0);
+    }
+
+    #[test]
+    fn a_configured_default_session_wins_over_the_remembered_one() {
+        let sessions = [session("Hyprland"), session("Mango"), session("Niri")];
+        let last = LastLogin {
+            user: None,
+            session: Some("Mango".to_owned()),
+        };
+        assert_eq!(preselect(&sessions, Some("niri"), &last), 2);
+        assert_eq!(preselect(&sessions, None, &last), 1);
+        // A default no session has is ignored, not fatal.
+        assert_eq!(preselect(&sessions, Some("sway"), &last), 1);
     }
 }

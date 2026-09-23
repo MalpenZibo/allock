@@ -142,7 +142,7 @@ pub fn view(screen: Screen) -> Container {
                 .cross_alignment(CrossAlignment::Center),
         )
         .child(avatar(&screen))
-        .child(name(&screen))
+        .child(who(&screen))
         .child(field(&screen))
         .child(notice(&screen))
         .child(fingerprint_hint(&screen));
@@ -181,6 +181,39 @@ fn avatar(screen: &Screen) -> Container {
                 .font_size(38.0)
                 .into_any(),
         })
+}
+
+/// Who is signing in: the user picker in the greeter, the name otherwise.
+///
+/// The picker lists the accounts people log in to and then, unless
+/// `[greeter] other_user` is off, "Other…", which has the form ask for the
+/// name. With nobody listed there is nothing to pick and the form asks
+/// anyway, so the name line stands in.
+fn who(screen: &Screen) -> Container {
+    if screen.mode != Mode::Greeter || screen.users.is_empty() {
+        return container().child(name(screen));
+    }
+    let other = screen
+        .config
+        .greeter
+        .other_user
+        .then(|| "Other…".to_owned());
+    let names = screen
+        .users
+        .iter()
+        .map(|user| user.display_name.clone())
+        .chain(other)
+        .collect();
+    // Held while an answer is checked: the attempt belongs to the account
+    // it was typed for.
+    let busy = screen.auth.state.busy;
+    super::picker::view(
+        screen,
+        names,
+        screen.user_choice,
+        super::picker::Look::Plain,
+        busy.into_signal(),
+    )
 }
 
 fn name(screen: &Screen) -> Text {

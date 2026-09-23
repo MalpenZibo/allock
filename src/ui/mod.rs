@@ -13,6 +13,7 @@
 
 pub mod clock;
 pub mod form;
+pub mod picker;
 pub mod status;
 
 use std::rc::Rc;
@@ -40,12 +41,11 @@ pub struct Screen {
     /// `None` when the battery indicator is off or there is no battery.
     pub battery: Option<RwSignal<Option<UPowerService>>>,
     pub sessions: Rc<Vec<SessionDef>>,
-    pub session_index: RwSignal<usize>,
-    /// Which way the picker last stepped: `1` for next, `-1` for previous,
-    /// `0` before the first step.
-    /// Only the slide reads it — with two sessions both arrows land on the
-    /// same index, so the index alone cannot say which way to move.
-    pub session_step: RwSignal<isize>,
+    pub session: picker::Choice,
+    /// Greeter only: the accounts offered by the user picker. The picker has
+    /// one more entry after them, "Other…", which asks for the name instead.
+    pub users: Rc<Vec<UserInfo>>,
+    pub user_choice: picker::Choice,
     pub now: Signal<DateTime<Local>>,
 }
 

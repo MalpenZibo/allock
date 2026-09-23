@@ -24,6 +24,8 @@ enum Answer {
     },
     /// Throw the attempt away and start a new session.
     Restart,
+    /// Throw the attempt away and start one for this account, or ask for one.
+    User(Option<String>),
     /// The UI is gone.
     Closed,
 }
@@ -40,6 +42,8 @@ enum Step {
     /// when the *user* abandons an attempt: greetd still holds the session
     /// open and would reject a second `create_session`.
     CancelAndRestart,
+    /// `CancelAndRestart`, for another account — `None` asks for its name.
+    CancelAndSwitch(Option<String>),
     /// Nothing left to do.
     Stop,
 }
@@ -49,6 +53,7 @@ async fn next(cmd_rx: &mut mpsc::Receiver<AuthCommand>) -> Answer {
         Some(AuthCommand::Respond(text)) => Answer::Text(text),
         Some(AuthCommand::StartSession { command, env }) => Answer::Start { command, env },
         Some(AuthCommand::Restart) => Answer::Restart,
+        Some(AuthCommand::SetUser(user)) => Answer::User(user),
         None => Answer::Closed,
     }
 }
@@ -82,7 +87,8 @@ pub async fn run(
     };
 
     // `None` means "ask in the form". Once known, the name is reused after a
-    // failed attempt so the user only retypes the password.
+    // failed attempt so the user only retypes the password. The user picker
+    // replaces it with `SetUser`.
     let mut user = configured_user.filter(|u| !u.trim().is_empty());
 
     'session: loop {
@@ -119,6 +125,13 @@ pub async fn run(
                     }
                     continue 'session;
                 }
+                Step::CancelAndSwitch(next_user) => {
+                    if !cancel(&mut stream, &event_tx).await {
+                        return;
+                    }
+                    user = next_user;
+                    continue 'session;
+                }
                 Step::Stop => return,
             }
         }
@@ -149,6 +162,7 @@ async fn handle(
                         response: Some(answer),
                     }),
                     Answer::Restart => Step::CancelAndRestart,
+                    Answer::User(user) => Step::CancelAndSwitch(user),
                     // Nothing to start before authenticating: answer with
                     // nothing rather than stalling greetd.
                     Answer::Start { .. } => {
@@ -238,6 +252,9 @@ async fn ask_username(
             Answer::Text(name) if !name.trim().is_empty() => {
                 return Some(name.trim().to_owned());
             }
+            // Picked from the list while the form was asking: that is the
+            // answer. "Other…" again is what is already being asked.
+            Answer::User(Some(name)) => return Some(name),
             Answer::Closed => return None,
             _ => continue,
         }

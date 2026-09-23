@@ -29,7 +29,7 @@ use clap::Parser;
 use guido::prelude::*;
 
 use crate::auth::{Backend, FingerprintConfig};
-use crate::config::{Config, SessionDef};
+use crate::config::{Config, SessionDef, SessionOutput};
 use crate::services::compat::run_readonly_service;
 use crate::services::upower::UPowerService;
 use crate::ui::Screen;
@@ -204,8 +204,9 @@ fn run_pam_screen(
         user: create_signal(Some(user)),
         battery: battery_service(&config),
         sessions,
-        session_index: create_signal(0),
-        session_step: create_signal(0),
+        session: ui::picker::Choice::new(0),
+        users: Rc::new(Vec::new()),
+        user_choice: ui::picker::Choice::new(0),
         now: ui::clock::create(),
         config,
     };
@@ -294,19 +295,26 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
     } else {
         last_login::LastLogin::default()
     };
-    // Only meaningful when the form is the one asking: with `[greeter] user`
-    // set, the first prompt is already the password.
-    let remembered_user = configured_user
-        .is_none()
-        .then(|| remembered.user.clone())
-        .flatten();
+
+    // The user picker: the accounts people log in to, then — unless turned
+    // off — "Other…" at `users.len()`, which asks for the name in the form. It
+    // starts on the configured account, else the remembered one, else the
+    // first: a suggestion the arrows undo, so remembering can never keep
+    // somebody else from signing in. With nobody listed the form asks.
+    let users = Rc::new(user::login_users());
+    let preselected_user = [configured_user.as_deref(), remembered.user.as_deref()]
+        .into_iter()
+        .flatten()
+        .find_map(|name| users.iter().position(|user| user.name == name))
+        .unwrap_or(0);
+    let chosen = |index: usize| users.get(index).cloned();
 
     // greetd runs the PAM stack itself, so there is no second credential to
     // check locally — fingerprint verification would prove identity without
     // producing a session greetd would accept.
     let auth = auth::start(
         Backend::Greetd {
-            user: configured_user.clone(),
+            user: chosen(preselected_user).map(|user| user.name),
         },
         None,
     );
@@ -315,40 +323,39 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         theme,
         auth,
         mode: Mode::Greeter,
-        user: create_signal(
-            configured_user
-                .as_deref()
-                .or(remembered_user.as_deref())
-                .and_then(user::by_name),
-        ),
+        user: create_signal(chosen(preselected_user)),
         battery: battery_service(&config),
         sessions: sessions.clone(),
-        session_index: create_signal(remembered.session_index(&sessions)),
-        session_step: create_signal(0),
+        session: ui::picker::Choice::new(last_login::preselect(
+            &sessions,
+            config.greeter.default_session.as_deref(),
+            &remembered,
+        )),
+        users: users.clone(),
+        user_choice: ui::picker::Choice::new(preselected_user),
         now: ui::clock::create(),
         config: config.clone(),
     };
 
-    // The remembered name is typed into the field, not handed to greetd: the
-    // username step stays, so the greeter can never remember its way into
-    // refusing to let somebody else log in. It waits for the prompt to arrive
-    // because until then the field masks what it holds — a name shown as dots
-    // reads as a password somebody else typed.
-    if let Some(name) = remembered_user.clone() {
-        let state = auth.state;
-        let filled = create_signal(false);
-        create_effect(move || {
-            let asking_in_the_clear = state.prompt.get().is_some_and(|prompt| !prompt.secret);
-            if asking_in_the_clear && !filled.get_untracked() {
-                filled.set(true);
-                state.input.set(name.clone());
-            }
-        });
-    }
-
-    // The username step answers a visible prompt; showing who is signing in
-    // is the only reason we keep it.
+    // A step in the user picker starts the conversation over for that
+    // account. The first run is the preselection greetd was started with.
     let user_signal = screen.user;
+    let user_index = screen.user_choice.index;
+    let asked_for = std::cell::Cell::new(preselected_user);
+    create_effect({
+        let users = users.clone();
+        move || {
+            let index = user_index.get();
+            if asked_for.replace(index) == index {
+                return;
+            }
+            let user = users.get(index).cloned();
+            auth.set_user(user.as_ref().map(|user| user.name.clone()));
+            user_signal.set(user);
+        }
+    });
+
+    // Under "Other…" the name is typed; once it is, show who is signing in.
     create_effect(move || {
         if let Some(name) = auth.state.visible_answer.get() {
             user_signal.set(user::by_name(&name));
@@ -356,8 +363,12 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
     });
 
     // Authenticated: hand greetd the session to launch.
-    let session_index = screen.session_index;
+    let session_index = screen.session.index;
     let remember = config.greeter.remember;
+    let systemd_cat = match config.greeter.session_output {
+        SessionOutput::Journal => find_in_path("systemd-cat"),
+        SessionOutput::Console => None,
+    };
     create_effect(move || {
         if !auth.state.authenticated.get() {
             return;
@@ -372,12 +383,13 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         if remember {
             // Before the request, not after: once greetd accepts it this
             // process exits, and a write racing that loses.
-            let user = configured_user
-                .clone()
+            let user = users
+                .get(user_index.get_untracked())
+                .map(|user| user.name.clone())
                 .or_else(|| auth.state.visible_answer.get_untracked());
             last_login::save(user.as_deref(), &session.name);
         }
-        auth.start_session(session.command.clone(), session.env.clone());
+        auth.start_session(session.argv(systemd_cat.as_deref()), session.env.clone());
     });
 
     // greetd starts the session only once the greeter has exited
@@ -447,4 +459,18 @@ fn battery_service(config: &Config) -> Option<RwSignal<Option<UPowerService>>> {
         .indicators
         .battery
         .then(run_readonly_service::<UPowerService>)
+}
+
+/// The first executable called `name` on `$PATH`.
+fn find_in_path(name: &str) -> Option<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .map(|dir| dir.join(name))
+        .find(|candidate| {
+            candidate
+                .metadata()
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })
 }

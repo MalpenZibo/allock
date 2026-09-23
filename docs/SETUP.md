@@ -81,14 +81,37 @@ In `/etc/greetd/config.toml`:
 
 ```toml
 [default_session]
-command = "niri -c /etc/greetd/allock-niri.kdl"
+command = "systemd-cat -t allock-greeter niri -c /etc/greetd/allock-niri.kdl"
 user = "greeter"
 ```
+
+`systemd-cat` sends what the greeter's niri and allock print to the journal
+(`journalctl -t allock-greeter`) instead of the console. greetd runs the
+greeter on its VT, so without it niri's log is what you read on tty1 before the
+greeter draws and again while it hands over to your session.
+
+The session you log in to gets the same treatment from allock itself: it is
+started through `systemd-cat`, so what its start script prints lands in the
+journal (`journalctl -t niri-session`) rather than on the console for a moment
+before the desktop appears. `session_output = "Console"` turns that off.
+
+Options for the greeter itself — `default_session`, `other_user`, `user`,
+`session_output` — go in `/etc/greetd/allock.toml` under `[greeter]`, not in
+greetd's config.
 
 **`[initial_session]`** is autologin: greetd runs it once at boot without
 asking, and shows `default_session` — the greeter — only after you log out.
 Remove the section to see the greeter at every boot. Keep it if you prefer to
 land in your session and lock it at startup, as above.
+
+The greeter lists the accounts people log in to in a user picker, with
+"Other…" for any other name, and preselects the last one used. To pick a
+session once and for all, set `default_session = "Niri"` under `[greeter]` in
+`/etc/greetd/allock.toml`; without it the last session used comes back.
+
+For an avatar, put a square picture at
+`/var/lib/AccountsService/icons/<your user>`: the greeter cannot read
+`~/.face` in a private home.
 
 The greeter lists the sessions installed under `/usr/share/wayland-sessions`
 (and `/usr/share/xsessions`). To offer a different list, add
@@ -102,8 +125,14 @@ text console first. From your session, switch to one with Ctrl+Alt+F2, log in,
 and:
 
 ```sh
+systemctl --user stop niri.service   # the session you are leaving
 sudo systemctl restart greetd
 ```
+
+Stop the old niri first. `niri.service` runs under your user's systemd, not
+inside greetd's session, so restarting greetd leaves it running, and
+`niri-session` then refuses to start a second one ("A niri session is already
+running"). A reboot starts clean.
 
 greetd takes over its VT (see `vt` in its config) and shows the greeter. If
 something is wrong, `journalctl -b -u greetd` says what; put `[default_session]`

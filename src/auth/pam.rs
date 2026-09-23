@@ -107,7 +107,7 @@ pub async fn run(
         let reply = match command {
             AuthCommand::Respond(answer) => Reply::Answer(answer),
             AuthCommand::Restart => Reply::Abort,
-            AuthCommand::StartSession { .. } => continue,
+            AuthCommand::StartSession { .. } | AuthCommand::SetUser(_) => continue,
         };
         if reply_tx.send(reply).is_err() {
             break;

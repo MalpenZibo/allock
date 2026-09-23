@@ -157,6 +157,10 @@ battery = true
 # Start on the last account and session. Kept in $GREETER_CACHE, which only
 # the greeter user can read.
 remember = true
+# Or always start on one session, whatever was used last:
+# default_session = "Niri"
+# Offer "Other…" in the user picker, for an account it does not list:
+# other_user = false
 EOF
 
 step "Creating the greeter's cache ($GREETER_CACHE)"
@@ -206,7 +210,7 @@ cat <<EOF
 Done. To make it your login screen, set in $GREETD/config.toml:
 
     [default_session]
-    command = "niri -c $GREETD/allock-niri.kdl"
+    command = "systemd-cat -t allock-greeter niri -c $GREETD/allock-niri.kdl"
     user = "greeter"
 
 and read docs/SETUP.md about [initial_session] before rebooting.

@@ -260,11 +260,60 @@ pub struct SessionDef {
     pub env: Vec<String>,
 }
 
+impl SessionDef {
+    /// The argv to start, with its output sent to the journal through
+    /// `systemd_cat` when there is one.
+    ///
+    /// greetd starts a session on the greeter's VT with the console as its
+    /// output, so whatever its start script prints — `niri-session`'s
+    /// deprecation warning from `systemctl import-environment`, say — is read
+    /// on screen between the greeter and the desktop. `systemd-cat` replaces
+    /// itself with the command, so what greetd waits on is still the session.
+    /// It is tagged with the command's name: `journalctl -t niri-session`.
+    pub fn argv(&self, systemd_cat: Option<&std::path::Path>) -> Vec<String> {
+        let (Some(systemd_cat), Some(program)) = (systemd_cat, self.command.first()) else {
+            return self.command.clone();
+        };
+        let tag = std::path::Path::new(program)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| program.clone());
+        [
+            systemd_cat.to_string_lossy().into_owned(),
+            "-t".to_owned(),
+            tag,
+        ]
+        .into_iter()
+        .chain(self.command.iter().cloned())
+        .collect()
+    }
+}
+
+/// Where a started session's console output goes.
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SessionOutput {
+    /// The journal, through `systemd-cat` — the console when it is missing.
+    #[default]
+    Journal,
+    /// The greeter's VT, as greetd leaves it.
+    Console,
+}
+
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct GreeterConfig {
-    /// Preselected user name. Empty means the form asks for it first.
+    /// Preselected account in the user picker, over the remembered one. An
+    /// account the picker does not list is ignored.
     pub user: Option<String>,
+    /// Preselected session, by name, over the remembered one. Case does not
+    /// matter; a name no session has is ignored.
+    pub default_session: Option<String>,
+    /// Where the session's console output goes. See [`SessionDef::argv`].
+    pub session_output: SessionOutput,
+    /// Offer "Other…" after the listed accounts, for one the list does not
+    /// have — a network directory, systemd-homed. Off, only listed accounts
+    /// can sign in here, unless nobody is listed: then the form asks anyway.
+    pub other_user: bool,
     /// Sessions offered in the picker. Empty means scan the standard
     /// `wayland-sessions` / `xsessions` directories.
     #[serde(rename = "session")]
@@ -279,6 +328,9 @@ impl Default for GreeterConfig {
     fn default() -> Self {
         Self {
             user: None,
+            default_session: None,
+            other_user: true,
+            session_output: SessionOutput::Journal,
             sessions: Vec::new(),
             remember: true,
         }
@@ -696,5 +748,26 @@ mod tests {
         let all: [(&str, &str, &str); 0] = [];
         assert!(!Outputs::All.selects(0, &all));
         assert!(!Outputs::Targets(vec!["DP-2".into()]).selects(0, &all));
+    }
+
+    #[test]
+    fn a_session_goes_through_systemd_cat_when_there_is_one() {
+        let niri = SessionDef {
+            name: "Niri".to_owned(),
+            command: vec!["/usr/bin/niri-session".to_owned(), "--flag".to_owned()],
+            env: Vec::new(),
+        };
+        let cat = std::path::Path::new("/usr/bin/systemd-cat");
+        assert_eq!(
+            niri.argv(Some(cat)),
+            [
+                "/usr/bin/systemd-cat",
+                "-t",
+                "niri-session",
+                "/usr/bin/niri-session",
+                "--flag"
+            ]
+        );
+        assert_eq!(niri.argv(None), niri.command);
     }
 }
