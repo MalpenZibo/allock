@@ -13,10 +13,16 @@
 #   --greeter    install the greeter files as well
 #   --force      overwrite greeter files that already exist
 #   --prefix P   install under P instead of /usr/local
+#   --wallpaper F  the greeter's wallpaper (default: GREETER_WALLPAPER below)
 
 set -euo pipefail
 
 PREFIX=/usr/local
+# One fixed picture for the greeter, copied once at install: the session's
+# wallpaper rotates through a library the greeter cannot read, and keeping a
+# second library in step with it is not worth it. Falls back to the
+# `[background] path` of your allock config when this file is missing.
+GREETER_WALLPAPER="$HOME/.config/niri-wallpaper/library/Abstract - Nature.jpg"
 GREETER=0
 FORCE=0
 
@@ -25,7 +31,8 @@ while [[ $# -gt 0 ]]; do
         --greeter) GREETER=1 ;;
         --force) FORCE=1 ;;
         --prefix) PREFIX="$2"; shift ;;
-        -h | --help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --wallpaper) GREETER_WALLPAPER="$2"; shift ;;
+        -h | --help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -108,8 +115,11 @@ step "Copying what the greeter cannot read from your home"
 # lock screen reads from your home has to be copied somewhere it can reach.
 
 WALLPAPER_LINE=""
-wallpaper_src="$(toml_line path "$USER_CONFIG" | sed -E 's/^[^"]*"([^"]*)".*/\1/')"
-wallpaper_src="${wallpaper_src/#\~/$HOME}"
+wallpaper_src="$GREETER_WALLPAPER"
+if [[ ! -r "$wallpaper_src" ]]; then
+    wallpaper_src="$(toml_line path "$USER_CONFIG" | sed -E 's/^[^"]*"([^"]*)".*/\1/')"
+    wallpaper_src="${wallpaper_src/#\~/$HOME}"
+fi
 if [[ -n "$wallpaper_src" && -r "$wallpaper_src" ]]; then
     resolved="$(readlink -f "$wallpaper_src")"
     ext="${resolved##*.}"
@@ -118,7 +128,7 @@ if [[ -n "$wallpaper_src" && -r "$wallpaper_src" ]]; then
     WALLPAPER_LINE="path = \"$dest\""
     echo "    wallpaper: $resolved -> $dest"
 else
-    echo "    no readable [background] path in $USER_CONFIG; the greeter uses a plain colour"
+    echo "    no readable wallpaper ($GREETER_WALLPAPER, or [background] path in $USER_CONFIG); the greeter uses a plain colour"
 fi
 
 ASHELL_LINE='ashell_config = ""'

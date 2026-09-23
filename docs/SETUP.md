@@ -19,15 +19,20 @@ Run it as yourself; it asks for sudo where it needs root.
 | the PAM policy (see the README) | `/etc/pam.d/allock` | lock |
 | the greeter's allock config | `/etc/greetd/allock.toml` | greeter |
 | the niri config hosting the greeter | `/etc/greetd/allock-niri.kdl` | greeter |
-| your wallpaper, copied | `/usr/local/share/allock/greeter-wallpaper.*` | greeter |
+| one fixed wallpaper, copied | `/usr/local/share/allock/greeter-wallpaper.*` | greeter |
 | your ashell config, copied for its colours | `/etc/greetd/allock-ashell.toml` | greeter |
 | the greeter's memory of the last login | `/var/cache/allock/` | greeter |
 
 The greeter runs as the `greeter` user, which cannot read your home, so the
-script copies what it needs out of it: the wallpaper named by `[background]
-path` in your allock config, your ashell config, and the keyboard layout and
-cursor theme from your niri config. Re-run it with `--force` after changing
-any of those.
+script copies what it needs out of it: your ashell config, and the keyboard
+layout and cursor theme from your niri config. Re-run it with `--force` after
+changing any of those.
+
+The greeter's wallpaper is one fixed picture, copied once, rather than
+whatever your session's wallpaper currently is — a rotating library would
+have to be kept in step in two places. It is `GREETER_WALLPAPER` at the top of
+the script, or `--wallpaper FILE`; when that file is missing the script falls
+back to `[background] path` in your allock config.
 
 Before going further, try the lock screen without locking anything:
 
