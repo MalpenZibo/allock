@@ -45,6 +45,9 @@ pub enum AuthEvent {
     Rejected,
     /// The backend is gone and will ask nothing more.
     Ended(String),
+    /// greetd accepted the session. It starts once the greeter has exited,
+    /// so this is the greeter's cue to leave.
+    SessionAccepted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +127,8 @@ pub struct AuthState {
     pub rejections: RwSignal<u32>,
     /// Set only by [`AuthEvent::Success`].
     pub authenticated: RwSignal<bool>,
+    /// Set only by [`AuthEvent::SessionAccepted`], in greeter mode.
+    pub session_accepted: RwSignal<bool>,
     pub fingerprint: RwSignal<FingerprintState>,
     /// The text being typed. Owned here so the auth layer can clear it on a
     /// failed attempt, and so every output's field mirrors the same buffer.
@@ -142,6 +147,7 @@ impl AuthState {
             notice: create_signal(None),
             rejections: create_signal(0),
             authenticated: create_signal(false),
+            session_accepted: create_signal(false),
             fingerprint: create_signal(FingerprintState::default()),
             input: create_signal(String::new()),
             visible_answer: create_signal(None),
@@ -225,6 +231,7 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let notice_w = state.notice.writer();
     let rejections_w = state.rejections.writer();
     let authenticated_w = state.authenticated.writer();
+    let session_accepted_w = state.session_accepted.writer();
     let fingerprint_w = state.fingerprint.writer();
     let input_w = state.input.writer();
 
@@ -300,6 +307,7 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                             busy_w.set(false);
                             notice_w.set(Some(Notice { level: NoticeLevel::Error, text }));
                         }
+                        AuthEvent::SessionAccepted => session_accepted_w.set(true),
                     }
                 }
                 // Polled here, where it is owned; a finished reader has

@@ -185,12 +185,14 @@ async fn handle(
             }
         }
 
-        // The second Success acknowledges `StartSession`: greetd is about to
-        // replace the greeter with the session.
+        // The second Success acknowledges `StartSession`. greetd starts the
+        // session only once the greeter process has exited, so the greeter
+        // has to go now — see `greetd-ipc(7)`.
         Response::Success => {
             let _ = event_tx
                 .send(AuthEvent::Info("Starting session…".to_owned()))
                 .await;
+            let _ = event_tx.send(AuthEvent::SessionAccepted).await;
             Step::Stop
         }
 

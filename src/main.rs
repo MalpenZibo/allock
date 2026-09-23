@@ -355,8 +355,7 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         }
     });
 
-    // Authenticated: hand greetd the session to launch. greetd replaces the
-    // greeter with it, so there is nothing to do afterwards.
+    // Authenticated: hand greetd the session to launch.
     let session_index = screen.session_index;
     let remember = config.greeter.remember;
     create_effect(move || {
@@ -371,14 +370,24 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         let session = &sessions[session_index.get_untracked() % sessions.len()];
         log::info!("starting session {}", session.name);
         if remember {
-            // Before the request, not after: greetd replaces this process with
-            // the session, and a write racing that loses.
+            // Before the request, not after: once greetd accepts it this
+            // process exits, and a write racing that loses.
             let user = configured_user
                 .clone()
                 .or_else(|| auth.state.visible_answer.get_untracked());
             last_login::save(user.as_deref(), &session.name);
         }
         auth.start_session(session.command.clone(), session.env.clone());
+    });
+
+    // greetd starts the session only once the greeter has exited
+    // (`greetd-ipc(7)`), so accepted means leave. The compositor hosting the
+    // greeter has to quit with it — that is its config's job.
+    create_effect(move || {
+        if auth.state.session_accepted.get() {
+            log::info!("greetd accepted the session; exiting so it can start");
+            quit_app();
+        }
     });
 
     // Exclusive: the greeter owns the machine, nothing else may take the
