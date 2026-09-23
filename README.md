@@ -20,10 +20,14 @@ lock screen with it.
 ## Install
 
 ```sh
-cargo build --release
-install -Dm755 target/release/allock /usr/local/bin/allock
-install -Dm644 pam/allock /etc/pam.d/allock   # recommended, see below
+scripts/install.sh             # binary and PAM policy
+scripts/install.sh --greeter   # and the greeter's config, wallpaper and niri config
 ```
+
+It builds, installs `allock` to `/usr/local/bin` and `pam/allock` to
+`/etc/pam.d/allock` (recommended, see below). [docs/SETUP.md](docs/SETUP.md)
+covers the rest: binding the lock screen, idle and lid, and making it your
+greetd greeter.
 
 Icons come from a system `Symbols Nerd Font`; without one they render as
 tofu, but nothing stops working.
@@ -155,13 +159,17 @@ Point greetd at it in `/etc/greetd/config.toml`, inside a compositor:
 
 ```toml
 [default_session]
-command = "niri --config /etc/greetd/niri.conf"
+command = "niri -c /etc/greetd/allock-niri.kdl"
 user = "greeter"
 ```
 
-…with the greeter compositor spawning `allock --greeter -c /etc/greetd/allock.toml`.
-allock runs as the `greeter` user there, so it cannot read your home — give it
-its own config with `-c`.
+…with the greeter compositor spawning `allock --greeter -c /etc/greetd/allock.toml`
+and quitting once allock exits: greetd starts the session only after the
+greeter process — the compositor — has terminated, and allock exits as soon as
+greetd accepts the session. allock runs as the `greeter` user there, so it
+cannot read your home — give it its own config with `-c`.
+`scripts/install.sh --greeter` writes both files; see
+[docs/SETUP.md](docs/SETUP.md).
 
 greetd runs the PAM stack itself, so the greeter always requires the password:
 a fingerprint match would prove identity without producing a session greetd
