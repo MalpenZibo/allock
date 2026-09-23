@@ -205,7 +205,7 @@ fn run_pam_screen(
         battery: battery_service(&config),
         sessions,
         session_index: create_signal(0),
-        session_step: create_signal(1),
+        session_step: create_signal(0),
         now: ui::clock::create(),
         config,
     };
@@ -324,7 +324,7 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         battery: battery_service(&config),
         sessions: sessions.clone(),
         session_index: create_signal(remembered.session_index(&sessions)),
-        session_step: create_signal(1),
+        session_step: create_signal(0),
         now: ui::clock::create(),
         config: config.clone(),
     };

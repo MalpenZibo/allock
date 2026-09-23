@@ -1,7 +1,5 @@
 //! The bottom row: session picker in the middle, battery on the right.
 
-use std::cell::Cell;
-
 use guido::prelude::*;
 
 use super::Screen;
@@ -11,23 +9,12 @@ use crate::services::upower::BatteryStatus;
 
 /// Exact, for the reason the field's width is: the window the names slide
 /// through has to stay put while they do, or the arrows either side of it
-/// would jump with every name. A name too long for it goes onto more lines.
+/// would jump with every name. A name too long for it wraps.
 const SESSION_LABEL_WIDTH: f32 = 200.0;
 
 /// The padding around a session name inside its window.
 const LABEL_PADDING: [f32; 2] = [8.0, 14.0];
 const LABEL_FONT_SIZE: f32 = 15.0;
-
-/// A generous guess at how wide one character of a name is drawn, per pixel
-/// of font size.
-///
-/// The names are broken into lines here rather than by the text widget,
-/// because guido wraps without aligning: the lines of a wrapped name would all
-/// hang from the left of a label that centres everything else. Breaking them
-/// here needs a width to break at, and nothing measures text ahead of layout,
-/// so this errs wide — a line that breaks early costs a line, one that breaks
-/// late is cut by the card.
-const CHAR_WIDTH_PER_PX: f32 = 0.6;
 
 /// The round buttons either side of the name.
 const ARROW_SIZE: f32 = 36.0;
@@ -141,8 +128,8 @@ fn session_picker(screen: &Screen) -> Container {
     }
 
     let go = move |by: isize| {
-        // The direction first: the label rebuilds on the index, and reads
-        // the direction as it does.
+        // The direction first: the label rebuilds on the index, and both the
+        // name arriving and the one leaving read the direction as it does.
         step.set(by);
         index.update(|i| *i = (*i as isize + by).rem_euclid(count as isize) as usize);
     };
@@ -160,15 +147,16 @@ fn session_picker(screen: &Screen) -> Container {
 
 /// The window the names slide through.
 ///
-/// A fixed width, and as tall as the name with the most lines: guido cannot
-/// measure text, so that name is drawn invisibly behind every label and the
-/// visible one fills the box it makes. Every label is then the same size, and
-/// nothing around the picker moves while the names change.
+/// A fixed width, and as tall as the name that wraps onto the most lines:
+/// every name is drawn invisibly behind the visible one, which fills the box
+/// they make. Every label is then the same size, and nothing around the picker
+/// moves while the names change.
 ///
-/// Rebuilt on every change of the index, drawing the name it left beside the
-/// one it arrived at: the old one travels out from the middle, the new one in
-/// from the far side, both clipped by the card. On the first build there is
-/// nothing to leave, and the name simply sits there.
+/// Rebuilt on every change of the index. The new name enters from the side
+/// the arrow points to and the old one leaves by the other, both by their own
+/// width and both clipped by the card; a name still leaving when the next
+/// step comes finishes from where it is. `step` is `0` until the first step,
+/// so the first name enters from where it rests: it simply sits there.
 ///
 /// The direction comes from `step` rather than from comparing indices,
 /// because with two sessions next and previous land on the same one.
@@ -180,83 +168,46 @@ fn session_label(
 ) -> Container {
     let theme = screen.theme;
     let count = names.len();
-    let shown: Cell<Option<usize>> = Cell::new(None);
 
-    let room = SESSION_LABEL_WIDTH - LABEL_PADDING[1] * 2.0;
-    let per_line = (room / (LABEL_FONT_SIZE * CHAR_WIDTH_PER_PX)).floor() as usize;
-    let lines: Vec<Vec<String>> = names.iter().map(|n| break_lines(n, per_line)).collect();
-    let tallest = lines
-        .iter()
-        .max_by_key(|l| l.len())
-        .cloned()
-        .unwrap_or_default();
-
-    let column = |lines: &[String], color: Color| {
-        lines.iter().fold(
-            container().layout(
-                Flex::column()
-                    .main_alignment(MainAlignment::Center)
-                    .cross_alignment(CrossAlignment::Center),
-            ),
-            |column, line| {
-                column.child(
-                    text(line.clone())
-                        .font_size(LABEL_FONT_SIZE)
-                        .color(color)
-                        .nowrap(),
-                )
-            },
-        )
+    let line = |name: &str, color: Color| {
+        text(name.to_owned())
+            .font_size(LABEL_FONT_SIZE)
+            .color(color)
+            .align(TextAlign::Center)
     };
 
-    let name = move |i: usize, at: Translate, from: Option<Translate>| {
+    let name = move |i: usize| {
         let slide = Transition::new(SLIDE_MS, TimingFunction::EaseInOut);
-        let translate = match from {
-            Some(from) => at.transition(slide).entering_from(from),
-            None => at.transition(slide),
-        };
-        container()
-            .width(SESSION_LABEL_WIDTH)
-            .padding(LABEL_PADDING)
-            .layout(ZStack::new())
-            .translate(translate)
-            // Leads the height; the visible name follows it.
-            .child(column(&tallest, Color::TRANSPARENT))
-            .child(column(&lines[i], theme.text).width(fill()).height(fill()))
+        let arriving = step.get_untracked() as f32;
+        names
+            .iter()
+            .fold(
+                container()
+                    .width(SESSION_LABEL_WIDTH)
+                    .padding(LABEL_PADDING)
+                    .layout(ZStack::new()),
+                |label, name| label.child(line(name, Color::TRANSPARENT)),
+            )
+            .child(
+                container()
+                    .width(fill())
+                    .height(fill())
+                    .layout(Flex::column().center())
+                    .child(line(&names[i], theme.text)),
+            )
+            .translate(
+                Translate::NONE
+                    .transition(slide)
+                    .entering_from(Translate::relative(arriving, 0.0))
+                    // Read when the name is removed, so it leaves the way the
+                    // step that replaced it went.
+                    .exiting_to(move || Translate::relative(-step.get() as f32, 0.0)),
+            )
     };
 
     super::card_surface(screen)
         .corners(Corners::squircle(16.0))
-        .child(move || {
-            let current = index.get() % count;
-            let previous = shown.replace(Some(current)).filter(|&p| p != current);
-            let stack = container().layout(ZStack::new());
-            let Some(previous) = previous else {
-                return stack.child(name(current, Translate::NONE, None));
-            };
-            let by = if step.get_untracked() < 0 { -1.0 } else { 1.0 };
-            let away = Translate::new(-by * SESSION_LABEL_WIDTH, 0.0);
-            let beyond = Translate::new(by * SESSION_LABEL_WIDTH, 0.0);
-            stack
-                .child(name(previous, away, Some(Translate::NONE)))
-                .child(name(current, Translate::NONE, Some(beyond)))
-        })
-}
-
-/// Greedy word wrap at `per_line` characters. A single word longer than that
-/// keeps its own line rather than being split mid-word.
-fn break_lines(name: &str, per_line: usize) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    for word in name.split_whitespace() {
-        match lines.last_mut() {
-            Some(line) if line.chars().count() + 1 + word.chars().count() <= per_line => {
-                line.push(' ');
-                line.push_str(word);
-            }
-            _ => lines.push(word.to_owned()),
-        }
-    }
-    lines
+        .child(move || name(index.get() % count))
 }
 
 fn arrow(screen: &Screen, glyph: StaticIcon, on_click: impl Fn() + 'static) -> Container {
@@ -269,40 +220,11 @@ fn arrow(screen: &Screen, glyph: StaticIcon, on_click: impl Fn() + 'static) -> C
             container()
                 .width(fill())
                 .height(fill())
-                .layout(
-                    Flex::column()
-                        .main_alignment(MainAlignment::Center)
-                        .cross_alignment(CrossAlignment::Center),
-                )
+                .layout(Flex::column().center())
                 .child(icon().kind(glyph).font_size(18.0).color(theme.text)),
         )
         .when_hovered(|s| s.lighter(0.08))
         .when_pressed(|s| s.ripple())
+        .cursor(CursorIcon::Pointer)
         .on_click(on_click)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::break_lines;
-
-    #[test]
-    fn a_name_that_fits_stays_on_one_line() {
-        assert_eq!(break_lines("CustomHyprland", 19), ["CustomHyprland"]);
-    }
-
-    #[test]
-    fn a_long_name_breaks_between_words() {
-        assert_eq!(
-            break_lines("Hyprland (uwsm-managed)", 19),
-            ["Hyprland", "(uwsm-managed)"]
-        );
-    }
-
-    #[test]
-    fn a_word_longer_than_a_line_is_not_split() {
-        assert_eq!(
-            break_lines("Supercalifragilisticexpialidocious", 19),
-            ["Supercalifragilisticexpialidocious"]
-        );
-    }
 }

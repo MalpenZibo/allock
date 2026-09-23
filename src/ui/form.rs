@@ -4,6 +4,7 @@
 use guido::prelude::*;
 
 use super::Screen;
+use crate::Mode;
 use crate::auth::{FingerprintState, NoticeLevel};
 use crate::components::icons::{IconKind, icon};
 use crate::theme::with_alpha;
@@ -113,11 +114,7 @@ fn turning_glyph<M>(
     };
     let glyph = container()
         .height(size)
-        .layout(
-            Flex::column()
-                .main_alignment(MainAlignment::Center)
-                .cross_alignment(CrossAlignment::Center),
-        )
+        .layout(Flex::column().center())
         .child(
             icon()
                 .kind(IconKind::from(kind))
@@ -174,11 +171,7 @@ fn avatar(screen: &Screen) -> Container {
         .corners(AVATAR_SIZE / 2.0)
         .background(with_alpha(theme.primary, 0.15))
         .overflow(Overflow::Hidden)
-        .layout(
-            Flex::column()
-                .main_alignment(MainAlignment::Center)
-                .cross_alignment(CrossAlignment::Center),
-        )
+        .layout(Flex::column().center())
         // The avatar takes its box from this container — `Cover` crops the
         // picture into whatever room it is offered.
         .child(move || match user.get().and_then(|user| user.avatar) {
@@ -224,6 +217,13 @@ fn field(screen: &Screen) -> Container {
     let theme = screen.theme;
     let auth = screen.auth;
     let state = auth.state;
+    // The lock screen hides the pointer (see `super::lock_screen`), and the
+    // field would bring it back as an I-beam: a caret-less masked field has
+    // nothing a click could place. The greeter keeps it, for the user name.
+    let pointer = match screen.mode {
+        Mode::Greeter => CursorIcon::Text,
+        Mode::Lock | Mode::Preview => CursorIcon::Hidden,
+    };
 
     // The mask follows the prompt: greetd asks for a user name in the clear, PAM
     // for a password. A memo, so the field is rebuilt when the answer flips
@@ -274,6 +274,7 @@ fn field(screen: &Screen) -> Container {
                             .color(theme.text)
                             .placeholder_color(with_alpha(theme.text, 0.4))
                             .no_caret()
+                            .cursor(pointer)
                             .autofocus()
                             .on_submit(move |_| auth.submit())
                     }),

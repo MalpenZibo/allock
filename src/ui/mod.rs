@@ -41,7 +41,8 @@ pub struct Screen {
     pub battery: Option<RwSignal<Option<UPowerService>>>,
     pub sessions: Rc<Vec<SessionDef>>,
     pub session_index: RwSignal<usize>,
-    /// Which way the picker last stepped: `1` for next, `-1` for previous.
+    /// Which way the picker last stepped: `1` for next, `-1` for previous,
+    /// `0` before the first step.
     /// Only the slide reads it — with two sessions both arrows land on the
     /// same index, so the index alone cannot say which way to move.
     pub session_step: RwSignal<isize>,
@@ -61,11 +62,7 @@ pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
     let centre = container()
         .width(fill())
         .height(fill())
-        .layout(
-            Flex::column()
-                .main_alignment(MainAlignment::Center)
-                .cross_alignment(CrossAlignment::Center),
-        )
+        .layout(Flex::column().center())
         .child({
             let screen = screen.clone();
             move || {
@@ -98,35 +95,20 @@ pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
         // Painted under the wallpaper so a missing or half-loaded image never
         // shows through to a transparent surface.
         .background(theme.background)
+        // The greeter is used with a pointer — the session picker is clicked.
+        // The lock screen is typed at, and a pointer over it is only in the
+        // way; the password field still shows its I-beam under the pointer.
+        .cursor(match screen.mode {
+            Mode::Greeter => CursorIcon::Default,
+            Mode::Lock | Mode::Preview => CursorIcon::Hidden,
+        })
         .layout(ZStack::new())
         .child(background_image(&screen))
         .child(scrim(&screen))
         .child(centre)
         .child(bottom);
 
-    let root = if screen.mode == Mode::Greeter {
-        show_pointer(root)
-    } else {
-        root
-    };
     attach_keys(root, screen)
-}
-
-/// Give the pointer a shape when it arrives, so the greeter has a cursor.
-///
-/// A Wayland client that sets no shape on enter gets no cursor at all, and
-/// guido only sends one when the shape *changes* — never on enter. That is
-/// what keeps the lock screen cursorless, and it stays that way there. The
-/// greeter wants one, and asking for `Default` alone would be dropped as no
-/// change, so it goes through another shape first: both land in the same
-/// pass, and only the last one reaches the compositor.
-fn show_pointer(root: Container) -> Container {
-    root.on_hover(|inside| {
-        if inside {
-            set_cursor(CursorIcon::Text);
-            set_cursor(CursorIcon::Default);
-        }
-    })
 }
 
 /// Whether this output is one of the ones drawing the interface, as a tracked
@@ -204,11 +186,7 @@ fn background_image(screen: &Screen) -> Option<Container> {
         container()
             .width(fill())
             .height(fill())
-            .layout(
-                Flex::column()
-                    .main_alignment(MainAlignment::Center)
-                    .cross_alignment(CrossAlignment::Center),
-            )
+            .layout(Flex::column().center())
             .child(image(source).content_fit(fit)),
     )
 }
