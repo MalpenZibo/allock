@@ -43,13 +43,6 @@ const SPINNER_SCALE: f32 = 0.918;
 const FIELD_WIDTH: f32 = 360.0;
 const AVATAR_SIZE: f32 = 76.0;
 
-/// Degrees the spinner turns per step of `AuthState::spin`.
-///
-/// The auth task steps twenty-five times a second, so twelve degrees is a turn
-/// every 1.2 seconds: plainly moving, and not in a hurry about a wait it has no
-/// way to shorten.
-const SPIN_STEP: f32 = 12.0;
-
 /// The glyph beside the fingerprint hint, and the spinner that stands in for
 /// it while the sensor is reading.
 const HINT_GLYPH_SIZE: f32 = 15.0;
@@ -88,13 +81,24 @@ fn shake() -> Keyframes<f32> {
         .at(1.0, 0.0)
 }
 
-/// What an affordance shows: `resting` normally, a turning ring while `spin`
-/// says its check is in flight.
+/// The spinner's turn: once round every 1.2 seconds, at an even pace, for as
+/// long as it is on screen. Plainly moving, and not in a hurry about a wait it
+/// has no way to shorten.
+fn spin() -> Keyframes<f32> {
+    Keyframes::new(1200.0)
+        .at(0.0, 0.0)
+        .at(1.0, 360.0)
+        .repeat(Repeat::Forever)
+}
+
+/// What an affordance shows: `resting` normally, a turning ring while
+/// `turning` says its check is in flight.
 ///
-/// Not a keyframe. guido's timelines are finite and play from a trigger, and a
-/// wait has no end it can name. So the angle is stepped instead, by the auth
-/// task, which is the one that knows when the wait starts and when it ends;
-/// this only reads the count as degrees.
+/// The ring turns on an endless timeline, which plays for as long as the
+/// widget carrying it exists — and the ring exists only while the check does,
+/// since the caller rebuilds this when the wait starts and when it ends. So
+/// the wait needs no end it can name, and a screen at rest has nothing turning
+/// and nothing waking it.
 ///
 /// The box is pinned to `size` because the two glyphs do not have the same line
 /// box, and the row this sits in takes its height from its tallest child: the
@@ -106,11 +110,12 @@ fn turning_glyph<M>(
     resting: &str,
     size: f32,
     color: impl IntoSignal<Color, M>,
-    spin: Option<RwSignal<u32>>,
+    turning: bool,
 ) -> Container {
-    let (kind, font_size) = match spin {
-        Some(_) => (SPINNER_GLYPH, size * SPINNER_SCALE),
-        None => (resting, size),
+    let (kind, font_size) = if turning {
+        (SPINNER_GLYPH, size * SPINNER_SCALE)
+    } else {
+        (resting, size)
     };
     let glyph = container()
         .height(size)
@@ -121,18 +126,10 @@ fn turning_glyph<M>(
                 .font_size(font_size)
                 .color(color),
         );
-    match spin {
-        Some(spin) => glyph.rotate(
-            // The task steps twenty-five times a second and the screen draws
-            // rather more often than that, so the steps are carried rather than
-            // jumped: the angle eases over exactly one step's worth of time, and
-            // arrives just as the next one is published.
-            (move || spin.get() as f32 * SPIN_STEP).transition(Transition::new(
-                crate::auth::SPIN_PERIOD.as_millis() as f32,
-                TimingFunction::Linear,
-            )),
-        ),
-        None => glyph,
+    if turning {
+        glyph.rotate(0.0.timeline(spin()))
+    } else {
+        glyph
     }
 }
 
@@ -329,7 +326,7 @@ fn submit(screen: &Screen) -> Container {
                         with_alpha(theme.text, 0.25)
                     }
                 },
-                checking.then_some(state.spin),
+                checking,
             )
         })
 }
@@ -412,7 +409,7 @@ fn fingerprint_hint(screen: &Screen) -> Container {
                     FINGERPRINT_GLYPH,
                     HINT_GLYPH_SIZE,
                     color,
-                    reading.then_some(state.spin),
+                    reading,
                 ))
                 .child(text(message).font_size(13.0).color(color).nowrap()),
         )

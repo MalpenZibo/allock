@@ -183,16 +183,14 @@ async fn verify_loop(
         let done = loop {
             let status = tokio::select! {
                 status = status.next() => status,
-                // The touch, not its verdict. The words belong to this module,
-                // which knows what the hint said before; the fact goes to the
-                // conversation, which owns the tick that turns the spinner.
+                // The touch, not its verdict: the hint says a finger is being
+                // read, and the screen turns its ring for as long as it does.
                 Some(change) = finger.next() => {
                     let present = change.get().await.unwrap_or(false);
                     if let Some(hint) = hint_for_finger(present, reading) {
                         state.set(hint);
                     }
                     reading = present;
-                    let _ = event_tx.send(AuthEvent::Scanning(present)).await;
                     continue;
                 }
             };
