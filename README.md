@@ -91,7 +91,3 @@ user = "greeter"
 
 The greeter's own options go in `/etc/greetd/allock.toml` under `[greeter]`.
 [docs/SETUP.md](docs/SETUP.md) has the details.
-
-## 📄 License
-
-GPL-3.0-or-later. See [LICENSE](LICENSE).
