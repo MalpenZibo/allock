@@ -8,10 +8,6 @@ fn nerd_font_family_mono() -> FontFamily {
     FontFamily::name("Symbols Nerd Font Mono")
 }
 
-fn custom_icon_font() -> FontFamily {
-    FontFamily::name("Ashell Custom Icon")
-}
-
 // ---------------------------------------------------------------------------
 // Icon data types
 // ---------------------------------------------------------------------------
@@ -96,26 +92,6 @@ pub enum StaticIcon {
     Keyboard,
     Mouse,
     Gamepad,
-    KeyboardBatteryFull,
-    KeyboardBatteryMedium,
-    KeyboardBatteryLow,
-    KeyboardBatteryAlert,
-    KeyboardBatteryCharging,
-    MouseBatteryFull,
-    MouseBatteryMedium,
-    MouseBatteryLow,
-    MouseBatteryAlert,
-    MouseBatteryCharging,
-    HeadphoneBatteryFull,
-    HeadphoneBatteryMedium,
-    HeadphoneBatteryLow,
-    HeadphoneBatteryAlert,
-    HeadphoneBatteryCharging,
-    GamepadBatteryFull,
-    GamepadBatteryMedium,
-    GamepadBatteryLow,
-    GamepadBatteryAlert,
-    GamepadBatteryCharging,
     Remove,
 }
 
@@ -198,65 +174,16 @@ impl StaticIcon {
             StaticIcon::Keyboard => "\u{f030c}",
             StaticIcon::Mouse => "\u{f037d}",
             StaticIcon::Gamepad => "\u{f05ba}",
-            StaticIcon::KeyboardBatteryFull => "\u{c0000}",
-            StaticIcon::KeyboardBatteryMedium => "\u{c0001}",
-            StaticIcon::KeyboardBatteryLow => "\u{c0002}",
-            StaticIcon::KeyboardBatteryAlert => "\u{c0003}",
-            StaticIcon::KeyboardBatteryCharging => "\u{c0004}",
-            StaticIcon::MouseBatteryFull => "\u{c0005}",
-            StaticIcon::MouseBatteryMedium => "\u{c0006}",
-            StaticIcon::MouseBatteryLow => "\u{c0007}",
-            StaticIcon::MouseBatteryAlert => "\u{c0008}",
-            StaticIcon::MouseBatteryCharging => "\u{c0009}",
-            StaticIcon::HeadphoneBatteryFull => "\u{c000a}",
-            StaticIcon::HeadphoneBatteryMedium => "\u{c000b}",
-            StaticIcon::HeadphoneBatteryLow => "\u{c000c}",
-            StaticIcon::HeadphoneBatteryAlert => "\u{c000d}",
-            StaticIcon::HeadphoneBatteryCharging => "\u{c000e}",
-            StaticIcon::GamepadBatteryFull => "\u{f074d}",
-            StaticIcon::GamepadBatteryMedium => "\u{f074f}",
-            StaticIcon::GamepadBatteryLow => "\u{f074e}",
-            StaticIcon::GamepadBatteryAlert => "\u{f074b}",
-            StaticIcon::GamepadBatteryCharging => "\u{f0a22}",
             StaticIcon::Remove => "\u{f0377}",
         }
     }
 
-    fn uses_custom_font(&self) -> bool {
-        matches!(
-            self,
-            StaticIcon::KeyboardBatteryFull
-                | StaticIcon::KeyboardBatteryMedium
-                | StaticIcon::KeyboardBatteryLow
-                | StaticIcon::KeyboardBatteryAlert
-                | StaticIcon::KeyboardBatteryCharging
-                | StaticIcon::MouseBatteryFull
-                | StaticIcon::MouseBatteryMedium
-                | StaticIcon::MouseBatteryLow
-                | StaticIcon::MouseBatteryAlert
-                | StaticIcon::MouseBatteryCharging
-                | StaticIcon::HeadphoneBatteryFull
-                | StaticIcon::HeadphoneBatteryMedium
-                | StaticIcon::HeadphoneBatteryLow
-                | StaticIcon::HeadphoneBatteryAlert
-                | StaticIcon::HeadphoneBatteryCharging
-        )
-    }
-
     pub fn font_family(&self) -> FontFamily {
-        if self.uses_custom_font() {
-            custom_icon_font()
-        } else {
-            nerd_font_family()
-        }
+        nerd_font_family()
     }
 
     pub fn font_family_mono(&self) -> FontFamily {
-        if self.uses_custom_font() {
-            custom_icon_font()
-        } else {
-            nerd_font_family_mono()
-        }
+        nerd_font_family_mono()
     }
 }
 

@@ -19,48 +19,6 @@ use zbus::zvariant::ObjectPath;
 
 mod dbus;
 
-const KEYBOARD_BATTERY_ICONS: [StaticIcon; 5] = [
-    StaticIcon::KeyboardBatteryCharging,
-    StaticIcon::KeyboardBatteryFull,
-    StaticIcon::KeyboardBatteryMedium,
-    StaticIcon::KeyboardBatteryLow,
-    StaticIcon::KeyboardBatteryAlert,
-];
-
-const MOUSE_BATTERY_ICONS: [StaticIcon; 5] = [
-    StaticIcon::MouseBatteryCharging,
-    StaticIcon::MouseBatteryFull,
-    StaticIcon::MouseBatteryMedium,
-    StaticIcon::MouseBatteryLow,
-    StaticIcon::MouseBatteryAlert,
-];
-
-const HEADPHONE_BATTERY_ICONS: [StaticIcon; 5] = [
-    StaticIcon::HeadphoneBatteryCharging,
-    StaticIcon::HeadphoneBatteryFull,
-    StaticIcon::HeadphoneBatteryMedium,
-    StaticIcon::HeadphoneBatteryLow,
-    StaticIcon::HeadphoneBatteryAlert,
-];
-
-const GAMEPAD_BATTERY_ICONS: [StaticIcon; 5] = [
-    StaticIcon::GamepadBatteryCharging,
-    StaticIcon::GamepadBatteryFull,
-    StaticIcon::GamepadBatteryMedium,
-    StaticIcon::GamepadBatteryLow,
-    StaticIcon::GamepadBatteryAlert,
-];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(usize)]
-enum BatLevel {
-    Charging = 0,
-    Full = 1,
-    Medium = 2,
-    Low = 3,
-    Alert = 4,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct BatteryData {
     pub capacity: i64,
@@ -129,49 +87,6 @@ pub struct Peripheral {
     pub device: DeviceProxy<'static>,
 }
 
-impl Peripheral {
-    pub fn get_icon_state(&self) -> StaticIcon {
-        let get_type_icon =
-            |bat_level: BatLevel| -> StaticIcon { self.kind.get_battery_icon(bat_level) };
-
-        match self.data {
-            BatteryData {
-                status: BatteryStatus::Charging(_),
-                ..
-            } => get_type_icon(BatLevel::Charging),
-            BatteryData {
-                status: BatteryStatus::Discharging(_),
-                capacity,
-                ..
-            } if capacity < 10 => get_type_icon(BatLevel::Alert),
-            BatteryData {
-                status: BatteryStatus::Discharging(_),
-                capacity,
-                ..
-            } if capacity < 40 => get_type_icon(BatLevel::Low),
-            BatteryData {
-                status: BatteryStatus::Discharging(_),
-                capacity,
-                ..
-            } if capacity < 70 => get_type_icon(BatLevel::Medium),
-            BatteryData {
-                status: BatteryStatus::Discharging(_),
-                ..
-            } => get_type_icon(BatLevel::Full),
-            // Peripheral icons are coarse category/status icons.
-            // NotCharging is not active discharge, so keep the full-like state.
-            BatteryData {
-                status: BatteryStatus::NotCharging | BatteryStatus::Full,
-                ..
-            } => get_type_icon(BatLevel::Full),
-            BatteryData {
-                status: BatteryStatus::Unknown,
-                ..
-            } => get_type_icon(BatLevel::Alert),
-        }
-    }
-}
-
 #[derive(Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 pub enum PeripheralDeviceKind {
     Keyboard,
@@ -199,16 +114,6 @@ impl PeripheralDeviceKind {
             PeripheralDeviceKind::Headphones => StaticIcon::Headphones1,
             PeripheralDeviceKind::Gamepad => StaticIcon::Gamepad,
         }
-    }
-
-    fn get_battery_icon(self, level: BatLevel) -> StaticIcon {
-        let icons = match self {
-            PeripheralDeviceKind::Keyboard => &KEYBOARD_BATTERY_ICONS,
-            PeripheralDeviceKind::Mouse => &MOUSE_BATTERY_ICONS,
-            PeripheralDeviceKind::Headphones => &HEADPHONE_BATTERY_ICONS,
-            PeripheralDeviceKind::Gamepad => &GAMEPAD_BATTERY_ICONS,
-        };
-        icons[level as usize]
     }
 }
 
