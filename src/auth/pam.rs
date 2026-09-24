@@ -5,6 +5,12 @@
 //! side talk over channels: prompts go out on a tokio channel, answers come
 //! back on a `std::sync::mpsc` one the conversation handler blocks on.
 //!
+//! An attempt starts only once the user has submitted an answer, which then
+//! answers PAM's first question; later questions go to the screen as they
+//! come. Nothing is left waiting in a conversation while the screen sits
+//! idle, so unlocking by fingerprint, Escape or exiting never fails an
+//! attempt that pam_faillock would count.
+//!
 //! Note that `/etc/pam.d/<service>` must exist for this to work at all. On a
 //! typical Linux system `pam_unix` reads `/etc/shadow` through the setuid
 //! `unix_chkpwd` helper, which is what lets allock authenticate without being
@@ -131,6 +137,8 @@ fn pam_thread(
     let conversation = Conversation {
         events: event_tx.clone(),
         replies: reply_rx,
+        pending: None,
+        first_prompt: None,
     };
 
     let mut context = match Context::new(service, Some(user), conversation) {
@@ -148,9 +156,21 @@ fn pam_thread(
     // retried on the same handle, and reusing it keeps module state (failure
     // delays from pam_faildelay, tally counters) intact across attempts.
     loop {
+        // No attempt starts until there is an answer to start it with. An
+        // attempt left waiting in the conversation fails however it ends —
+        // unlocked by a finger, abandoned with Escape, the process exiting —
+        // and pam_faillock counts every failure: three fingerprint unlocks
+        // used to lock the account for ten minutes.
+        let Some(answer) = context.conversation_mut().wait_for_answer() else {
+            return;
+        };
+        context.conversation_mut().pending = Some(answer);
+
         let outcome = context
             .authenticate(Flag::NONE)
             .and_then(|()| context.acct_mgmt(Flag::NONE));
+        // Unused if PAM never asked; wiped as it drops.
+        context.conversation_mut().pending = None;
 
         let event = match outcome {
             Ok(()) => AuthEvent::Success,
@@ -162,6 +182,11 @@ fn pam_thread(
 
         let succeeded = event == AuthEvent::Success;
         if event_tx.blocking_send(event).is_err() || succeeded {
+            return;
+        }
+        // The next attempt starts from PAM's first question again, whatever
+        // this one ended on.
+        if context.conversation_mut().show_first_prompt().is_err() {
             return;
         }
     }
@@ -194,11 +219,48 @@ fn describe(code: ErrorCode, message: Option<&str>) -> String {
 struct Conversation {
     events: mpsc::Sender<AuthEvent>,
     replies: sync_mpsc::Receiver<Reply>,
+    /// The answer an attempt was started with, for PAM's first question.
+    pending: Option<Secret>,
+    /// PAM's first question, as it asked it: shown again between attempts.
+    first_prompt: Option<(bool, String)>,
 }
 
 impl Conversation {
+    /// Block until the user submits an answer. `None` once the UI is gone.
+    ///
+    /// An abandoned attempt here is not a PAM attempt at all — none has
+    /// started — so Escape only puts the first question back.
+    fn wait_for_answer(&mut self) -> Option<Secret> {
+        loop {
+            match self.replies.recv() {
+                Ok(Reply::Answer(answer)) => return Some(answer),
+                Ok(Reply::Abort) => self.show_first_prompt().ok()?,
+                Err(_) => return None,
+            }
+        }
+    }
+
+    /// Put PAM's first question back in the field, or the field's own
+    /// "Password" before PAM has asked anything.
+    fn show_first_prompt(&self) -> Result<(), ()> {
+        let (secret, message) = self
+            .first_prompt
+            .clone()
+            .unwrap_or_else(|| (true, "Password".to_owned()));
+        self.events
+            .blocking_send(AuthEvent::Prompt { secret, message })
+            .map_err(|_| ())
+    }
+
     fn ask(&mut self, prompt: &CStr, secret: bool) -> Result<CString, ErrorCode> {
         let message = prompt.to_string_lossy().into_owned();
+
+        // PAM's first question of an attempt: the answer is already here.
+        if let Some(answer) = self.pending.take() {
+            self.first_prompt = Some((secret, message));
+            return CString::new(answer.expose()).map_err(|_| ErrorCode::CONV_ERR);
+        }
+
         self.events
             .blocking_send(AuthEvent::Prompt { secret, message })
             .map_err(|_| ErrorCode::CONV_ERR)?;
