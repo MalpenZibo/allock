@@ -171,6 +171,9 @@ fn attach_keys(root: Container, screen: Screen) -> Container {
     })
 }
 
+/// How long the wallpaper takes to fade in once it is decoded.
+const WALLPAPER_FADE_MS: f32 = 400.0;
+
 fn background_image(screen: &Screen) -> Option<Container> {
     let source = ImageSource::Path(screen.wallpaper()?);
     let fit = match screen.config.background.fit {
@@ -178,6 +181,15 @@ fn background_image(screen: &Screen) -> Option<Container> {
         BackgroundFit::Contain => ContentFit::Contain,
         BackgroundFit::Stretch => ContentFit::Fill,
     };
+
+    // guido decodes the picture off the frame, so the first one goes out
+    // without it and the theme background the root paints is what shows.
+    // That matters most on a lock: a lock surface with no frame yet is a
+    // compositor showing its "locker has not drawn" colour — niri's dark
+    // red — for as long as a decode would take, ~140 ms for a 3K PNG. The
+    // picture fades in once it is ready rather than popping in.
+    let wallpaper = image(source).content_fit(fit);
+    let ready = wallpaper.ready();
 
     // The box comes from this container, which is the whole surface: `Cover`
     // and `Stretch` take all of it, `Contain` the largest rect of the picture's
@@ -187,7 +199,11 @@ fn background_image(screen: &Screen) -> Option<Container> {
             .width(fill())
             .height(fill())
             .layout(Flex::column().center())
-            .child(image(source).content_fit(fit)),
+            .opacity(
+                (move || if ready.get() { 1.0 } else { 0.0 })
+                    .transition(Transition::new(WALLPAPER_FADE_MS, TimingFunction::EaseOut)),
+            )
+            .child(wallpaper),
     )
 }
 

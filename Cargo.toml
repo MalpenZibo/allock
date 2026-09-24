@@ -11,7 +11,7 @@ name = "allock"
 path = "src/main.rs"
 
 [dependencies]
-guido = "0.7"
+guido = "0.8"
 
 # UI / runtime
 chrono = { version = "0.4", default-features = false, features = ["clock", "unstable-locales"] }
@@ -25,6 +25,7 @@ bytes = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 hex_color = { version = "3", features = ["serde"] }
+
 
 # Auth
 # MPL-2.0; keeps the unsafe libpam FFI out of the authentication path.
