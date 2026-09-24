@@ -12,10 +12,14 @@ use crate::services::upower::BatteryStatus;
 pub fn view(screen: Screen) -> Container {
     container()
         .width(fill())
+        // Bottom-aligned, not centred: the battery arrives a moment after the
+        // first frame (its reading comes over D-Bus) and is the tallest thing
+        // here, so a centred row would lift the session picker by half the
+        // card's height the moment it did.
         .layout(
             Flex::row()
                 .spacing(10.0)
-                .cross_alignment(CrossAlignment::Center),
+                .cross_alignment(CrossAlignment::End),
         )
         // Two fill-width sides around the picker share what is left equally,
         // which is what puts it in the middle of the screen rather than in the
