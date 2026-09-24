@@ -74,6 +74,17 @@ static LOCK_REFUSED: AtomicBool = AtomicBool::new(false);
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    // Before anything is typed: no core dump, and no ptrace attach short of
+    // root. guido keeps a password in pages that are locked and excluded from
+    // dumps, but copies outside it — pam-client2's `CString`, the keyboard's
+    // one-character strings, the clipboard — are plain memory, and a crash
+    // under systemd-coredump would write them to disk. Failing to set it is
+    // not a reason to leave the screen unlocked, so it is only reported.
+    let undumpable = match unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } {
+        0 => Ok(()),
+        _ => Err(std::io::Error::last_os_error()),
+    };
     let mode = match (args.greeter, args.preview) {
         (true, _) => Mode::Greeter,
         (_, true) => Mode::Preview,
@@ -89,6 +100,9 @@ async fn main() {
     )
     .init();
     log::info!("starting allock in {mode:?} mode");
+    if let Err(e) = undumpable {
+        log::warn!("could not mark the process undumpable: {e}");
+    }
 
     let config = config::load(&config_path);
 

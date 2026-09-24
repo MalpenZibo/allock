@@ -159,13 +159,13 @@ fn attach_keys(root: Container, screen: Screen) -> Container {
         }
         match key {
             Key::Escape => {
-                if auth.state.input.get_untracked().is_empty() {
+                if auth.state.field_is_empty_untracked() {
                     auth.restart();
                 } else {
-                    auth.state.input.set(String::new());
+                    auth.state.clear_field();
                 }
             }
-            Key::Char('u') if modifiers.ctrl => auth.state.input.set(String::new()),
+            Key::Char('u') if modifiers.ctrl => auth.state.clear_field(),
             _ => {}
         }
     })

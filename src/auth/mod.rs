@@ -50,10 +50,11 @@ pub enum AuthEvent {
     SessionAccepted,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum AuthCommand {
-    /// Answer the outstanding prompt.
-    Respond(String),
+    /// Answer the outstanding prompt. A `Secret` whatever the prompt, so a
+    /// password is never a `String` on its way to the backend.
+    Respond(Secret),
     /// Abandon this attempt; the backend starts a fresh conversation.
     Restart,
     /// Greeter only: launch this session now that we are authenticated.
@@ -133,9 +134,16 @@ pub struct AuthState {
     /// Set only by [`AuthEvent::SessionAccepted`], in greeter mode.
     pub session_accepted: RwSignal<bool>,
     pub fingerprint: RwSignal<FingerprintState>,
-    /// The text being typed. Owned here so the auth layer can clear it on a
-    /// failed attempt, and so every output's field mirrors the same buffer.
+    /// What is typed at a visible prompt — a user name. Owned here so the auth
+    /// layer can clear it, and so every output's field mirrors one buffer.
     pub input: RwSignal<String>,
+    /// What is typed at a secret prompt: guido's `Password`, which keeps it in
+    /// locked, undumpable pages and wipes them, and never hands out a copy.
+    pub password: Password,
+    /// Bumped by the auth task to have the field emptied — after a refusal, on
+    /// a new prompt, on success. A `Password` lives on the UI thread, so the
+    /// task asks rather than clears.
+    wipes: RwSignal<u32>,
     /// The last answer given to a *visible* prompt. In both flows we drive,
     /// the only thing ever asked in the clear is a user name — the greeter
     /// uses this to show who is signing in.
@@ -153,8 +161,51 @@ impl AuthState {
             session_accepted: create_signal(false),
             fingerprint: create_signal(FingerprintState::default()),
             input: create_signal(String::new()),
+            password: create_password(),
+            wipes: create_signal(0),
             visible_answer: create_signal(None),
         }
+    }
+
+    /// Whether the outstanding prompt is a secret one. Tracked. Before the
+    /// first prompt the field masks: a name shown as dots is a nuisance, a
+    /// password shown in the clear is not recoverable.
+    pub fn asks_secret(&self) -> bool {
+        self.prompt
+            .get()
+            .as_ref()
+            .map(|prompt| prompt.secret)
+            .unwrap_or(true)
+    }
+
+    /// Whether the field the prompt is using is empty. Tracked.
+    pub fn field_is_empty(&self) -> bool {
+        if self.asks_secret() {
+            self.password.is_empty()
+        } else {
+            self.input.get().is_empty()
+        }
+    }
+
+    /// [`field_is_empty`](Self::field_is_empty), for an event handler.
+    pub fn field_is_empty_untracked(&self) -> bool {
+        let secret = self
+            .prompt
+            .get_untracked()
+            .as_ref()
+            .map(|prompt| prompt.secret)
+            .unwrap_or(true);
+        if secret {
+            self.password.with_untracked(Secret::is_empty)
+        } else {
+            self.input.get_untracked().is_empty()
+        }
+    }
+
+    /// Empty both fields; the password is wiped in place.
+    pub fn clear_field(&self) {
+        self.input.set(String::new());
+        self.password.clear();
     }
 }
 
@@ -166,28 +217,39 @@ pub struct Auth {
 }
 
 impl Auth {
-    /// Answer the outstanding prompt with whatever is in the input buffer.
+    /// Answer the outstanding prompt with whatever is in the field.
+    ///
+    /// Enter and the submit arrow both come here. A password is duplicated
+    /// into protected pages of its own rather than taken, so the field keeps
+    /// its dots while the check runs; it is wiped when the answer comes back.
     pub fn submit(&self) {
-        if self.state.busy.get_untracked() || self.state.authenticated.get_untracked() {
+        let state = self.state;
+        if state.busy.get_untracked() || state.authenticated.get_untracked() {
             return;
         }
-        let answer = self.state.input.get_untracked();
+        let secret = state
+            .prompt
+            .get_untracked()
+            .map(|prompt| prompt.secret)
+            .unwrap_or(true);
         // An empty answer is never a real attempt, and attempts are counted:
         // pam_faillock locks the account after a handful. Enter on an empty field
         // used to spend one.
-        if answer.is_empty() {
-            return;
-        }
-        let visible = self
-            .state
-            .prompt
-            .get_untracked()
-            .is_some_and(|prompt| !prompt.secret);
-        if visible {
-            self.state.visible_answer.set(Some(answer.clone()));
-        }
-        self.state.busy.set(true);
-        self.state.notice.set(None);
+        let answer = if secret {
+            if state.password.with_untracked(Secret::is_empty) {
+                return;
+            }
+            state.password.with_untracked(Secret::duplicate)
+        } else {
+            let name = state.input.get_untracked();
+            if name.is_empty() {
+                return;
+            }
+            state.visible_answer.set(Some(name.clone()));
+            Secret::from(name)
+        };
+        state.busy.set(true);
+        state.notice.set(None);
         self.service.send(AuthCommand::Respond(answer));
     }
 
@@ -198,7 +260,7 @@ impl Auth {
     /// comes), and without this the field would take input that PAM is not
     /// listening for.
     pub fn restart(&self) {
-        self.state.input.set(String::new());
+        self.state.clear_field();
         self.state.busy.set(false);
         self.state.notice.set(None);
         self.service.send(AuthCommand::Restart);
@@ -209,7 +271,7 @@ impl Auth {
     /// Whatever was typed belongs to the attempt being abandoned — a password
     /// for the previous account, most likely — so it goes with it.
     pub fn set_user(&self, user: Option<String>) {
-        self.state.input.set(String::new());
+        self.state.clear_field();
         self.state.busy.set(false);
         self.state.notice.set(None);
         self.state.visible_answer.set(None);
@@ -248,7 +310,15 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let authenticated_w = state.authenticated.writer();
     let session_accepted_w = state.session_accepted.writer();
     let fingerprint_w = state.fingerprint.writer();
-    let input_w = state.input.writer();
+    let wipes_w = state.wipes.writer();
+
+    // The task's requests to empty the field, carried out on the UI thread,
+    // where the `Password` lives. The first run is the count at zero.
+    create_effect(move || {
+        if state.wipes.get() > 0 {
+            state.clear_field();
+        }
+    });
 
     let service = create_service::<AuthCommand, _, _>(move |mut ui_rx, _ctx| async move {
         let (event_tx, mut event_rx) = mpsc::channel::<AuthEvent>(32);
@@ -273,6 +343,8 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
         // The only writer, so it can be counted here rather than read back
         // from a signal a background task has no business reading.
         let mut rejections = 0u32;
+        // Likewise the only writer of the wipe count.
+        let mut wipes = 0u32;
 
         loop {
             tokio::select! {
@@ -290,7 +362,8 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                     log::debug!("auth event: {event:?}");
                     match event {
                         AuthEvent::Prompt { secret, message } => {
-                            input_w.set(String::new());
+                            wipes += 1;
+                            wipes_w.set(wipes);
                             busy_w.set(false);
                             prompt_w.set(Some(Prompt { secret, message }));
                         }
@@ -301,7 +374,8 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                             notice_w.set(Some(Notice { level: NoticeLevel::Error, text }));
                         }
                         AuthEvent::Failed(text) => {
-                            input_w.set(String::new());
+                            wipes += 1;
+                            wipes_w.set(wipes);
                             busy_w.set(false);
                             notice_w.set(Some(Notice { level: NoticeLevel::Error, text }));
                             rejections += 1;
@@ -313,7 +387,8 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                         }
                         // The one place the screen is allowed to open.
                         AuthEvent::Success => {
-                            input_w.set(String::new());
+                            wipes += 1;
+                            wipes_w.set(wipes);
                             busy_w.set(false);
                             notice_w.set(None);
                             authenticated_w.set(true);

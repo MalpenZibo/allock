@@ -10,14 +10,18 @@
 
 use greetd_ipc::codec::TokioCodec;
 use greetd_ipc::{AuthMessageType, ErrorType, Request, Response};
+use guido::prelude::Secret;
+use serde::Serialize;
+use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
+use zeroize::Zeroizing;
 
 use super::{AuthCommand, AuthEvent};
 
 /// What the UI came back with while the protocol loop was waiting.
 enum Answer {
-    Text(String),
+    Text(Secret),
     Start {
         command: Vec<String>,
         env: Vec<String>,
@@ -30,10 +34,18 @@ enum Answer {
     Closed,
 }
 
+/// What goes to greetd next.
+enum Outgoing {
+    Request(Request),
+    /// The answer to a prompt, written by [`write_answer`] so that the
+    /// password never passes through a `String`.
+    Answer(Secret),
+}
+
 /// Where the loop goes after handling one response.
 enum Step {
     /// Send this next, staying in the same greetd session.
-    Send(Request),
+    Send(Outgoing),
     /// Create a new session. greetd has already torn the old one down — this
     /// is the path after an auth error, where sending `CancelSession` would
     /// itself be an error.
@@ -103,13 +115,17 @@ pub async fn run(
             },
         };
 
-        let mut request = Request::CreateSession { username };
+        let mut request = Outgoing::Request(Request::CreateSession { username });
         // Distinguishes the two `Success` responses: the first ends the auth
         // conversation, the second acknowledges `StartSession`.
         let mut authenticated = false;
 
         loop {
-            if !write(&mut stream, &request, &event_tx).await {
+            let written = match &request {
+                Outgoing::Request(request) => write(&mut stream, request, &event_tx).await,
+                Outgoing::Answer(answer) => write_answer(&mut stream, answer, &event_tx).await,
+            };
+            if !written {
                 return;
             }
             let Some(response) = read(&mut stream, &event_tx).await else {
@@ -158,15 +174,15 @@ async fn handle(
                     .await;
 
                 match next(cmd_rx).await {
-                    Answer::Text(answer) => Step::Send(Request::PostAuthMessageResponse {
-                        response: Some(answer),
-                    }),
+                    Answer::Text(answer) => Step::Send(Outgoing::Answer(answer)),
                     Answer::Restart => Step::CancelAndRestart,
                     Answer::User(user) => Step::CancelAndSwitch(user),
                     // Nothing to start before authenticating: answer with
                     // nothing rather than stalling greetd.
                     Answer::Start { .. } => {
-                        Step::Send(Request::PostAuthMessageResponse { response: None })
+                        Step::Send(Outgoing::Request(Request::PostAuthMessageResponse {
+                            response: None,
+                        }))
                     }
                     Answer::Closed => Step::Stop,
                 }
@@ -179,7 +195,9 @@ async fn handle(
                     _ => AuthEvent::Info(auth_message),
                 };
                 let _ = event_tx.send(event).await;
-                Step::Send(Request::PostAuthMessageResponse { response: None })
+                Step::Send(Outgoing::Request(Request::PostAuthMessageResponse {
+                    response: None,
+                }))
             }
         },
 
@@ -189,7 +207,10 @@ async fn handle(
             loop {
                 match next(cmd_rx).await {
                     Answer::Start { command, env } => {
-                        break Step::Send(Request::StartSession { cmd: command, env });
+                        break Step::Send(Outgoing::Request(Request::StartSession {
+                            cmd: command,
+                            env,
+                        }));
                     }
                     Answer::Closed => break Step::Stop,
                     // Already authenticated: the only thing left that matters
@@ -249,8 +270,8 @@ async fn ask_username(
 
     loop {
         match next(cmd_rx).await {
-            Answer::Text(name) if !name.trim().is_empty() => {
-                return Some(name.trim().to_owned());
+            Answer::Text(name) if !name.expose().trim().is_empty() => {
+                return Some(name.expose().trim().to_owned());
             }
             // Picked from the list while the form was asking: that is the
             // answer. "Other…" again is what is already being asked.
@@ -288,6 +309,63 @@ async fn write(
     }
 }
 
+/// `post_auth_message_response`, written without the answer passing through a
+/// `String` or a buffer that is freed unwiped.
+///
+/// greetd's framing is a native-endian `u32` length and a JSON body.
+/// `greetd_ipc` would take the answer as a `String` and serialize it into a
+/// `Vec` it drops as it is; here the JSON is written straight from the
+/// secret's `&str` into a buffer reserved large enough never to grow — JSON
+/// escapes a byte into at most six — and wiped when it drops.
+async fn write_answer(
+    stream: &mut UnixStream,
+    answer: &Secret,
+    event_tx: &mpsc::Sender<AuthEvent>,
+) -> bool {
+    let Some(body) = encode_answer(answer.expose()) else {
+        return false;
+    };
+    let length = (body.len() as u32).to_ne_bytes();
+    let sent = match stream.write_all(&length).await {
+        Ok(()) => stream.write_all(&body).await,
+        Err(e) => Err(e),
+    };
+    match sent {
+        Ok(()) => true,
+        Err(e) => {
+            log::error!("greetd write failed: {e}");
+            let _ = event_tx
+                .send(AuthEvent::Ended("Lost the connection to greetd".to_owned()))
+                .await;
+            false
+        }
+    }
+}
+
+/// The JSON body of a `post_auth_message_response`, in a buffer that never
+/// reallocates and is wiped when it drops.
+fn encode_answer(answer: &str) -> Option<Zeroizing<Vec<u8>>> {
+    #[derive(Serialize)]
+    struct PostAuthMessageResponse<'a> {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        response: &'a str,
+    }
+
+    let mut body = Zeroizing::new(Vec::with_capacity(64 + 6 * answer.len()));
+    let message = PostAuthMessageResponse {
+        kind: "post_auth_message_response",
+        response: answer,
+    };
+    match serde_json::to_writer(&mut *body, &message) {
+        Ok(()) => Some(body),
+        Err(e) => {
+            log::error!("cannot encode the answer for greetd: {e}");
+            None
+        }
+    }
+}
+
 async fn read(stream: &mut UnixStream, event_tx: &mpsc::Sender<AuthEvent>) -> Option<Response> {
     match Response::read_from(stream).await {
         Ok(response) => Some(response),
@@ -297,6 +375,32 @@ async fn read(stream: &mut UnixStream, event_tx: &mpsc::Sender<AuthEvent>) -> Op
                 .send(AuthEvent::Ended("Lost the connection to greetd".to_owned()))
                 .await;
             None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_answer_is_encoded_as_greetd_ipc_would_without_growing() {
+        for answer in [
+            "hunter2",
+            "quo\"te\\back",
+            "tab\tnew\nline\u{1}",
+            "àèì 🔒",
+            "",
+        ] {
+            let body = encode_answer(answer).unwrap();
+            let expected = serde_json::to_vec(&Request::PostAuthMessageResponse {
+                response: Some(answer.to_owned()),
+            })
+            .unwrap();
+            assert_eq!(*body, expected, "{answer:?}");
+            // Grown means reallocated, and a reallocation frees the old
+            // buffer unwiped.
+            assert_eq!(body.capacity(), 64 + 6 * answer.len(), "{answer:?}");
         }
     }
 }

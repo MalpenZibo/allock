@@ -16,6 +16,8 @@ use std::sync::mpsc as sync_mpsc;
 use pam_client2::{Context, ConversationHandler, ErrorCode, Flag};
 use tokio::sync::mpsc;
 
+use guido::prelude::Secret;
+
 use super::{AuthCommand, AuthEvent};
 
 /// Stock policies to borrow when allock has none of its own, best first.
@@ -68,7 +70,7 @@ pub fn resolve_service(configured: &str) -> Option<String> {
 
 /// What the async side hands back to a blocked conversation callback.
 enum Reply {
-    Answer(String),
+    Answer(Secret),
     /// Abandon the attempt: makes the callback fail, which unwinds
     /// `authenticate()` so a fresh attempt can start.
     Abort,
@@ -204,7 +206,15 @@ impl Conversation {
         match self.replies.recv() {
             // A NUL in the answer cannot come from the text field, but PAM
             // would silently truncate at it, so refuse instead.
-            Ok(Reply::Answer(answer)) => CString::new(answer).map_err(|_| ErrorCode::CONV_ERR),
+            //
+            // The one copy of a password outside guido's protected pages:
+            // pam-client2 asks for a `CString`, `strdup`s it for PAM — which
+            // wipes its own copy — and drops ours unwiped. Out of reach here;
+            // the process is undumpable (see `main`), so it cannot reach a
+            // core dump. The `Secret` itself is wiped as it drops.
+            Ok(Reply::Answer(answer)) => {
+                CString::new(answer.expose()).map_err(|_| ErrorCode::CONV_ERR)
+            }
             Ok(Reply::Abort) | Err(_) => Err(ErrorCode::CONV_ERR),
         }
     }

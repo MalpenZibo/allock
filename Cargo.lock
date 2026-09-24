@@ -41,10 +41,12 @@ dependencies = [
  "pam-client2",
  "pin-project-lite",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
  "uzers",
  "zbus",
+ "zeroize",
 ]
 
 [[package]]
@@ -944,9 +946,9 @@ dependencies = [
 
 [[package]]
 name = "guido"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98718a88b0971066b9f87a79609a6206fb022b3ece833b083761418328d5b867"
+checksum = "0b16be40eea00565ad54432bb4c7d3587b61036a25710a00346474e44694e918"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
@@ -966,13 +968,14 @@ dependencies = [
  "wayland-backend",
  "wayland-protocols",
  "wgpu",
+ "zeroize",
 ]
 
 [[package]]
 name = "guido-macros"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fa335adf5564cfa7cc638aaf6208b8d0e9329f0fed5a38d77c52befa32eb2e6"
+checksum = "8753e194c90b6fe052a1e848fe2b11d9f1563abd11de398389372f1705baffa3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2108,22 +2111,20 @@ checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
 
 [[package]]
 name = "smithay-client-toolkit"
-version = "0.20.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0512da38f5e2b31201a93524adb8d3136276fa4fe4aafab4e1f727a82b534cc0"
+checksum = "74dc9ee14b0fdcb535f9556141bacac070c994a977d2240ee455d7438a617f00"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
  "calloop",
  "calloop-wayland-source",
  "cursor-icon",
- "libc",
  "log",
  "memmap2",
  "pkg-config",
  "rustix",
  "thiserror 2.0.20",
- "wayland-backend",
  "wayland-client",
  "wayland-csd-frame",
  "wayland-cursor",
@@ -2704,9 +2705,9 @@ dependencies = [
 
 [[package]]
 name = "wayland-protocols-experimental"
-version = "20250721.0.1"
+version = "20251230.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40a1f863128dcaaec790d7b4b396cc9b9a7a079e878e18c47e6c2d2c5a8dcbb1"
+checksum = "91c6c3e7178e553d093d46999032bc79aafea9dedd71dd702c8ace7bbc25cf13"
 dependencies = [
  "bitflags 2.13.2",
  "wayland-backend",
@@ -3225,6 +3226,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 
 [[package]]
 name = "zlib-rs"

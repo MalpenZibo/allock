@@ -255,10 +255,11 @@ fn field(screen: &Screen) -> Container {
         Mode::Lock | Mode::Preview => CursorIcon::Hidden,
     };
 
-    // The mask follows the prompt: greetd asks for a user name in the clear, PAM
-    // for a password. A memo, so the field is rebuilt when the answer flips
-    // rather than on every prompt — `password()` takes a bool, not a signal.
-    let secret = create_memo(move || is_secret(&state.prompt.get()));
+    // The field follows the prompt: greetd asks for a user name in the clear,
+    // PAM for a password, and they are two different widgets — a password is
+    // typed into guido's `Password`, a name into a `String`. A memo, so the
+    // field is rebuilt when the answer flips rather than on every prompt.
+    let secret = create_memo(move || state.asks_secret());
     let failed = create_memo(move || {
         matches!(
             state.notice.get().map(|notice| notice.level),
@@ -297,16 +298,31 @@ fn field(screen: &Screen) -> Container {
                     // `autofocus` then takes — so the greeter's username step
                     // becomes the password step without a click.
                     container().width(fill()).child(move || {
-                        text_input(state.input)
-                            .password(secret.get())
-                            .placeholder(move || prompt_label(&state.prompt.get()))
-                            .font_size(16.0)
-                            .color(theme.text)
-                            .placeholder_color(with_alpha(theme.text, 0.4))
-                            .no_caret()
-                            .cursor(pointer)
-                            .autofocus()
-                            .on_submit(move |_| auth.submit())
+                        // The two field types share their builder but no trait
+                        // allock can name, so the common dress is spelled once
+                        // here.
+                        macro_rules! dressed {
+                            ($field:expr) => {
+                                $field
+                                    .placeholder(move || prompt_label(&state.prompt.get()))
+                                    .font_size(16.0)
+                                    .color(theme.text)
+                                    .placeholder_color(with_alpha(theme.text, 0.4))
+                                    .no_caret()
+                                    .cursor(pointer)
+                                    .autofocus()
+                            };
+                        }
+                        if secret.get() {
+                            container().child(
+                                dressed!(password_input(state.password))
+                                    .on_submit(move || auth.submit()),
+                            )
+                        } else {
+                            container().child(
+                                dressed!(text_input(state.input)).on_submit(move |_| auth.submit()),
+                            )
+                        }
                     }),
                 )
                 // Inside the field, where every other password field puts it:
@@ -353,7 +369,7 @@ fn submit(screen: &Screen) -> Container {
                 // instead of rebuilding it — and not read at all while the ring
                 // turns, which is lit whatever the field holds.
                 move || {
-                    if checking || !state.input.get().is_empty() {
+                    if checking || !state.field_is_empty() {
                         theme.primary
                     } else {
                         with_alpha(theme.text, 0.25)
@@ -447,12 +463,6 @@ fn fingerprint_hint(screen: &Screen) -> Container {
                 .child(text(message).font_size(13.0).color(color).nowrap()),
         )
     })
-}
-
-fn is_secret(prompt: &Option<crate::auth::Prompt>) -> bool {
-    // Defaults to masked: before the first prompt arrives we must not echo
-    // something that turns out to be a password.
-    prompt.as_ref().map(|prompt| prompt.secret).unwrap_or(true)
 }
 
 fn prompt_label(prompt: &Option<crate::auth::Prompt>) -> String {
