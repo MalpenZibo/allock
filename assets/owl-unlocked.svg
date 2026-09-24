@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img">
+  <title>allock, unlocked</title>
+  <path d="M50 8 C72 8 84 24 84 44 C84 70 74 92 50 92 C26 92 16 70 16 44 C16 24 28 8 50 8 Z" fill="#9a6b45"/>
+  <path d="M18 54 C15 68 19 84 33 89 C27 75 26 63 18 54 Z" fill="#7a5236"/>
+  <path d="M82 54 C85 68 81 84 67 89 C73 75 74 63 82 54 Z" fill="#7a5236"/>
+  <path d="M40 70 l3 3 l3 -3 M54 70 l3 3 l3 -3 M47 77 l3 3 l3 -3 M40 84 l3 3 l3 -3 M54 84 l3 3 l3 -3" fill="none" stroke="#7a5236" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="38" cy="44" r="16" fill="#d9b88f"/>
+  <circle cx="62" cy="44" r="16" fill="#d9b88f"/>
+  <ellipse cx="50" cy="50" rx="9" ry="11" fill="#d9b88f"/>
+  <circle cx="38" cy="45" r="9" fill="#1b1f2a"/>
+  <circle cx="62" cy="45" r="9" fill="#1b1f2a"/>
+  <circle cx="41" cy="42" r="2.4" fill="#f3ead8"/>
+  <circle cx="65" cy="42" r="2.4" fill="#f3ead8"/>
+  <path d="M46.5 55 Q50 52 53.5 55 L50 63 Z" fill="#e3c27a"/>
+  <ellipse cx="42" cy="92" rx="4.5" ry="2.2" fill="#e3c27a"/>
+  <ellipse cx="58" cy="92" rx="4.5" ry="2.2" fill="#e3c27a"/>
+</svg>

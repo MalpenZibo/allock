@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img">
+  <title>allock</title>
+  <path d="M50 8 C72 8 84 24 84 44 C84 70 74 92 50 92 C26 92 16 70 16 44 C16 24 28 8 50 8 Z" fill="none" stroke="#1b1f2a" stroke-width="4.5" stroke-linejoin="round"/>
+  <path d="M50 33.4 A16 16 0 1 0 50 54.6 A16 16 0 1 0 50 33.4 Z" fill="none" stroke="#1b1f2a" stroke-width="3.6" stroke-linejoin="round"/>
+  <path d="M25 60 C23 71 27 80 35 85 M75 60 C77 71 73 80 65 85" fill="none" stroke="#1b1f2a" stroke-width="3.6" stroke-linecap="round"/>
+  <circle cx="38" cy="45" r="7" fill="#1b1f2a"/>
+  <circle cx="62" cy="45" r="7" fill="#1b1f2a"/>
+  <circle cx="40.5" cy="42.5" r="2" fill="#f5f1ea"/>
+  <circle cx="64.5" cy="42.5" r="2" fill="#f5f1ea"/>
+  <path d="M46.5 58 Q50 55 53.5 58 L50 66 Z" fill="#1b1f2a"/>
+</svg>

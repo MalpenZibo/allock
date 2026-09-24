@@ -1,4 +1,9 @@
-# allock
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/wordmark-dark.svg">
+    <img src="assets/wordmark-light.svg" alt="allock" width="420">
+  </picture>
+</p>
 
 A lock screen and greetd greeter for [ashell](https://github.com/MalpenZibo/ashell)
 users, built on [guido](https://github.com/MalpenZibo/guido).
@@ -264,6 +269,23 @@ that same flat colour, and the clock goes back to being ordinary text.
   copies it again. Doing this properly needs a zeroing buffer down in guido's
   input handling.
 
+## Logo
+
+The owl is a tawny owl — an *allocco*, in Italian. The files are in
+[`assets/`](assets):
+
+| File | What |
+|---|---|
+| `logo.svg` | The owl |
+| `logo-line.svg` | The owl in outline, one colour |
+| `owl-locked.svg`, `owl-unlocked.svg` | Asleep and awake: locked and unlocked |
+| `icon.svg` | The app icon, the owl on a night tile |
+| `wordmark-light.svg`, `wordmark-dark.svg` | Owl and name, for light and dark backgrounds |
+
+## AI disclaimer
+
+allock has been developed with the assistance of AI.
+
 ## Licence
 
-GPL-3.0-or-later.
+GPL-3.0-or-later, the same as ashell. See [LICENSE](LICENSE).
