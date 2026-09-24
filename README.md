@@ -70,11 +70,6 @@ user = "greeter"
 The greeter's own options go in `/etc/greetd/allock.toml` under `[greeter]`.
 [docs/SETUP.md](docs/SETUP.md) has the details.
 
-## 🦉 Logo
-
-The owl is a tawny owl, an *allocco* in Italian. The files are in
-[`assets/`](assets).
-
 ## 📄 License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
