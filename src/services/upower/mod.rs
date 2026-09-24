@@ -1,4 +1,4 @@
-#![allow(dead_code)] // upstream verbatim
+#![allow(dead_code)] // peripherals, charge limit and power profiles are read but not shown
 use super::compat::Task;
 use super::compat::{Subscription, channel};
 use super::{ReadOnlyService, Service, ServiceEvent};

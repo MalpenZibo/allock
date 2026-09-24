@@ -1,5 +1,5 @@
 //! Colours resolved once from `[appearance]` and shared through guido's
-//! context, the same shape the ashell/guido port uses.
+//! context.
 
 use guido::prelude::Color;
 

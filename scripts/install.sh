@@ -7,7 +7,7 @@
 #
 # Run it as yourself, not as root: it builds with your toolchain and asks sudo
 # only for the steps that write outside your home. It never edits
-# /etc/greetd/config.toml or your own configs — see docs/SETUP.md for those.
+# /etc/greetd/config.toml or your own configs, see docs/SETUP.md for those.
 #
 # Options:
 #   --greeter    install the greeter files as well
@@ -103,10 +103,18 @@ fi
 
 USER_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/allock/config.toml"
 NIRI_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/niri/config.kdl"
-ASHELL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/ashell/config.toml"
 
 # The first `key = "value"` or `key = { ... }` line in a TOML file, verbatim.
 toml_line() { grep -m1 -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null || true; }
+# A TOML table verbatim, header included: from `[name]` up to the next header
+# that is not one of its own subtables.
+toml_table() {
+    awk -v name="$1" '
+        $0 ~ "^[[:space:]]*\\[" name "\\][[:space:]]*$" { inside = 1; print; next }
+        inside && /^[[:space:]]*\[/ && $0 !~ "^[[:space:]]*\\[" name "\\." { inside = 0 }
+        inside { print }
+    ' "$2" 2>/dev/null || true
+}
 # The first quoted value after `key` in a KDL file.
 kdl_value() { grep -m1 -E "^[[:space:]]*$1[[:space:]]+\"" "$2" 2>/dev/null | sed -E 's/^[^"]*"([^"]*)".*/\1/' || true; }
 
@@ -131,11 +139,11 @@ else
     echo "    no readable wallpaper ($GREETER_WALLPAPER, or [background] path in $USER_CONFIG); the greeter uses a plain colour"
 fi
 
-ASHELL_LINE='ashell_config = ""'
-if [[ -r "$ASHELL_CONFIG" ]]; then
-    sudo install -Dm644 "$ASHELL_CONFIG" "$GREETD/allock-ashell.toml"
-    ASHELL_LINE="ashell_config = \"$GREETD/allock-ashell.toml\""
-    echo "    ashell colours: $ASHELL_CONFIG -> $GREETD/allock-ashell.toml"
+APPEARANCE_BLOCK="$(toml_table appearance "$USER_CONFIG")"
+if [[ -n "$APPEARANCE_BLOCK" ]]; then
+    echo "    colours: [appearance] from $USER_CONFIG"
+else
+    echo "    no [appearance] in $USER_CONFIG; the greeter uses the default colours"
 fi
 
 MAIN_OUTPUT_LINE="$(toml_line main_output "$USER_CONFIG")"
@@ -144,7 +152,6 @@ MAIN_OUTPUT_LINE="$(toml_line main_output "$USER_CONFIG")"
 step "Writing the greeter's allock config"
 put "$GREETD/allock.toml" 644 <<EOF
 # allock's config in greeter mode. Written by scripts/install.sh.
-$ASHELL_LINE
 $MAIN_OUTPUT_LINE
 
 [background]
@@ -152,6 +159,8 @@ $WALLPAPER_LINE
 
 [indicators]
 battery = true
+
+$APPEARANCE_BLOCK
 
 [greeter]
 # Start on the last account and session. Kept in $GREETER_CACHE, which only

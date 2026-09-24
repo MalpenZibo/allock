@@ -1,4 +1,4 @@
-//! allock — a lock screen and greetd greeter wearing ashell's clothes.
+//! allock — a lock screen and greetd greeter.
 //!
 //! One binary, two modes:
 //!
@@ -10,7 +10,7 @@
 //!
 //! The look is not configurable the way hyprlock's is — the layout is decided
 //! here and the config only chooses colours, wallpaper, clock format and
-//! which indicators appear. That is ashell's bargain, kept.
+//! which indicators appear.
 
 mod auth;
 mod components;
@@ -51,7 +51,7 @@ pub enum Mode {
 }
 
 #[derive(Parser, Debug)]
-#[command(version, about = "Lock screen and greetd greeter for ashell users")]
+#[command(version, about = "Lock screen and greetd greeter for Wayland")]
 struct Args {
     /// Path to the config file (default `~/.config/allock/config.toml`)
     #[arg(short, long)]

@@ -1,6 +1,6 @@
 [package]
 name = "allock"
-description = "A lock screen and greetd greeter that follows ashell's look"
+description = "A lock screen and greetd greeter for Wayland"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
@@ -18,7 +18,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "unst
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync", "io-util", "process"] }
 futures = "0.3"
 pin-project-lite = "0.2"
-# Only used by the copied ashell service shim's image handle type.
+# Only used by the service shim's image handle type.
 bytes = "1"
 
 # Config

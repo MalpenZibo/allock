@@ -1,14 +1,10 @@
-//! ashell's services, reused as-is.
+//! Background services — today only UPower, for the battery.
 //!
-//! `compat.rs`, `throttle.rs` and `upower/` are copied verbatim from the
-//! ashell/guido port. They are written against the iced-shaped service traits
-//! that `compat.rs` mimics, so when ashell publishes them as a dedicated
-//! crate this module becomes a `use` line and the copies go away. Do not
-//! refactor them here — divergence is what would make that swap expensive.
+//! `upower/` is written against the iced-shaped service traits that
+//! `compat.rs` provides, and `throttle.rs` paces its updates.
 
-// allock uses one service where ashell uses a dozen, so most of the shim is
-// unreferenced here. Allowed at the module boundary rather than inside the
-// files, so the copies stay byte-identical to upstream.
+// The shim is general and allock uses one service, so most of it is
+// unreferenced. Allowed at the module boundary rather than item by item.
 #[allow(dead_code)]
 pub mod compat;
 mod throttle;

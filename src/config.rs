@@ -1,11 +1,7 @@
-//! allock configuration.
+//! allock configuration, read from `~/.config/allock/config.toml`.
 //!
-//! allock has its own file (`~/.config/allock/config.toml`) but does **not**
-//! own its look: the `[appearance]` table is read from ashell's config so a
-//! theme change there moves the lock screen with it. allock's own
-//! `[appearance]` table, if present, is deep-merged on top key by key — a
-//! partial override changes only the keys it names instead of resetting the
-//! rest to allock's defaults, which is what a plain serde `default` would do.
+//! Every key is optional. A table that names only some of its keys keeps the
+//! defaults for the rest, `[appearance]` included.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,9 +18,6 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Config {
     pub log_level: String,
-    /// Where to import `[appearance]` from. `None` (or a missing file) keeps
-    /// allock's built-in ashell-flavoured defaults.
-    pub ashell_config: Option<String>,
     /// Which outputs draw the interface — clock, login card, status row.
     /// Every output is always covered by a lock surface showing the
     /// background; this only decides which of them carry the controls.
@@ -41,7 +34,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             log_level: "warn".to_owned(),
-            ashell_config: Some("~/.config/ashell/config.toml".to_owned()),
             main_output: Outputs::default(),
             background: BackgroundConfig::default(),
             clock: ClockConfig::default(),
@@ -57,7 +49,7 @@ impl Default for Config {
 // Outputs
 // ---------------------------------------------------------------------------
 
-/// Same shape as ashell's `outputs` key.
+/// Which outputs something is drawn on.
 #[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub enum Outputs {
     #[default]
@@ -338,7 +330,7 @@ impl Default for GreeterConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Appearance — shared with ashell
+// Appearance
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize, Clone, Copy, Debug)]
@@ -353,8 +345,8 @@ pub enum AppearanceColor {
         strong: Option<HexColor>,
         weak: Option<HexColor>,
         /// Unused by allock's layout, but the variant is matched untagged:
-        /// dropping the field would make every ashell colour that sets it
-        /// fail to deserialize and silently fall back to the defaults.
+        /// dropping the field would make a colour that sets it fail to
+        /// deserialize and silently fall back to the defaults.
         #[allow(dead_code)]
         text: Option<HexColor>,
     },
@@ -382,10 +374,7 @@ fn hex_to_color(c: HexColor) -> Color {
 
 static PRIMARY: HexColor = HexColor::rgb(250, 179, 135);
 
-/// The subset of ashell's `[appearance]` that means something on a lock
-/// screen. Unknown keys from ashell's table (`style`, `bar`, `menu`,
-/// `workspace_colors`, …) are ignored rather than rejected, so the same
-/// table can serve both programs.
+/// Colours and font. Unknown keys are ignored rather than rejected.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Appearance {
@@ -457,25 +446,6 @@ fn read_toml(path: &Path) -> Option<toml::Table> {
     }
 }
 
-/// Recursively merge `over` into `base`; on a key both tables define, the
-/// deeper of the two wins only when both sides are tables, otherwise `over`
-/// replaces `base` wholesale.
-fn merge(base: toml::Value, over: toml::Value) -> toml::Value {
-    match (base, over) {
-        (toml::Value::Table(mut b), toml::Value::Table(o)) => {
-            for (key, value) in o {
-                let merged = match b.remove(&key) {
-                    Some(existing) => merge(existing, value),
-                    None => value,
-                };
-                b.insert(key, merged);
-            }
-            toml::Value::Table(b)
-        }
-        (_, over) => over,
-    }
-}
-
 /// Read just `log_level`, before the logger exists.
 ///
 /// The logger has to be up before [`load`] runs, or every diagnostic about
@@ -495,34 +465,12 @@ pub fn log_level(path: &Path) -> String {
         .unwrap_or_else(|| Config::default().log_level)
 }
 
-/// Load allock's config, importing `[appearance]` from ashell's.
+/// Load allock's config, falling back to the defaults for anything it does
+/// not say — or for all of it, when the file is missing or malformed.
 pub fn load(path: &Path) -> Config {
-    let mut table = read_toml(path).unwrap_or_default();
+    let table = read_toml(path).unwrap_or_default();
     if !path.exists() {
         log::info!("No config file at {path:?}, using defaults");
-    }
-
-    // Which ashell config to import from: allock's own key if it sets one,
-    // otherwise the default location.
-    let ashell_key = table
-        .get("ashell_config")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_owned())
-        .or_else(|| Config::default().ashell_config);
-
-    if let Some(ashell_path) = ashell_key.filter(|s| !s.is_empty()) {
-        let ashell_path = expand_tilde(&ashell_path);
-        match read_toml(&ashell_path).and_then(|mut t| t.remove("appearance")) {
-            Some(imported) => {
-                log::info!("Imported [appearance] from {ashell_path:?}");
-                let merged = match table.remove("appearance") {
-                    Some(own) => merge(imported, own),
-                    None => imported,
-                };
-                table.insert("appearance".to_owned(), merged);
-            }
-            None => log::info!("No [appearance] to import from {ashell_path:?}"),
-        }
     }
 
     match toml::Value::Table(table).try_into::<Config>() {
@@ -623,32 +571,37 @@ fn parse_desktop_entry(content: &str, kind: &str) -> Option<SessionDef> {
 mod tests {
     use super::*;
 
-    fn table(s: &str) -> toml::Value {
-        toml::Value::Table(toml::from_str(s).unwrap())
+    #[test]
+    fn the_example_config_parses_and_shows_the_defaults() {
+        let example: Config = toml::from_str(include_str!("../config.example.toml")).unwrap();
+        let (shown, defaults) = (example.appearance, Appearance::default());
+        for (shown, default) in [
+            (shown.background_color, defaults.background_color),
+            (shown.primary_color, defaults.primary_color),
+            (shown.text_color, defaults.text_color),
+            (shown.success_color, defaults.success_color),
+            (shown.warning_color, defaults.warning_color),
+            (shown.danger_color, defaults.danger_color),
+        ] {
+            assert_eq!(shown.base(), default.base());
+            assert_eq!(shown.weak(), default.weak());
+        }
+        assert_eq!(shown.opacity, defaults.opacity);
     }
 
     #[test]
-    fn merge_overrides_key_by_key() {
-        // The point of deep-merging instead of letting serde default: an
-        // allock-side override of one colour must not drop the imported ones.
-        let base = table("[appearance]\ntext_color = \"#111111\"\nprimary_color = \"#222222\"");
-        let over = table("[appearance]\nprimary_color = \"#333333\"");
-        let merged = merge(base, over);
-        let appearance = merged.get("appearance").unwrap();
+    fn a_partial_appearance_keeps_the_other_defaults() {
+        let config: Config = toml::from_str("[appearance]\nprimary_color = \"#333333\"").unwrap();
+        let defaults = Appearance::default();
         assert_eq!(
-            appearance.get("text_color").unwrap().as_str(),
-            Some("#111111")
+            config.appearance.primary_color.base(),
+            Color::rgb(0.2, 0.2, 0.2)
         );
         assert_eq!(
-            appearance.get("primary_color").unwrap().as_str(),
-            Some("#333333")
+            config.appearance.text_color.base(),
+            defaults.text_color.base()
         );
-    }
-
-    #[test]
-    fn merge_replaces_scalars_and_arrays() {
-        let merged = merge(table("a = [1, 2, 3]"), table("a = [9]"));
-        assert_eq!(merged.get("a").unwrap().as_array().unwrap().len(), 1);
+        assert_eq!(config.appearance.opacity, defaults.opacity);
     }
 
     #[test]

@@ -1,8 +1,7 @@
-//! Minimal mimic of the iced surface used by upstream ashell services, so
-//! their files can be copied here nearly verbatim (only the `use iced::...`
-//! lines change).
+//! A minimal mimic of the iced service surface, so services written in that
+//! style run on guido.
 //!
-//! Upstream services are state machines pushing `ServiceEvent`s into a
+//! Such services are state machines pushing `ServiceEvent`s into a
 //! stream built with `Subscription::run_with` + `stream::channel`, plus a
 //! `command()` returning a `Task`. This module provides those exact API
 //! shapes, and [`run_service`] drives them from a guido service task:
@@ -25,10 +24,9 @@ use futures::future::BoxFuture;
 use futures::stream::{BoxStream, FuturesUnordered, Stream, StreamExt};
 use guido::prelude::*;
 
-/// Event stream item produced by a service's `subscribe()` — identical to
-/// upstream ashell's.
+/// Event stream item produced by a service's `subscribe()`.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Error is produced by upstream service code
+#[allow(dead_code)] // Error is part of the service API; UPower never sends it
 pub enum ServiceEvent<S: ReadOnlyService> {
     Init(S),
     Update(S::UpdateEvent),
@@ -80,7 +78,7 @@ where
     futures::stream::select(rx.map(Some), driver).filter_map(|item| async move { item })
 }
 
-/// `iced::Task` mimic covering the constructors upstream services use.
+/// `iced::Task` mimic covering the constructors the services use.
 pub struct Task<T>(TaskInner<T>);
 
 enum TaskInner<T> {
@@ -139,7 +137,7 @@ pub mod svg {
     }
 }
 
-/// Reactive handle to a running upstream-style service: `None` until the
+/// Reactive handle to a running service: `None` until the
 /// service emits `Init`.
 ///
 /// Snapshots are published with `set_always` — services hold proxies and
@@ -149,7 +147,7 @@ pub mod svg {
 /// propagation when it didn't change).
 pub type ServiceSignal<S> = RwSignal<Option<S>>;
 
-/// Drive an upstream-style service from a guido service task.
+/// Drive an iced-style service from a guido service task.
 ///
 /// Subscribes to the service's event stream, folds events into the service
 /// value via `update()`, publishes every change as an always-notifying
@@ -226,7 +224,7 @@ where
 /// [`run_service`] plus a raw event hook, for consumers that react to the
 /// events themselves rather than to folded snapshots (the notifications
 /// list, the OSD). The hook runs on the service task before the event is
-/// folded, mirroring how upstream's app.rs sees `ServiceEvent`s.
+/// folded, the way an iced application sees `ServiceEvent`s.
 pub fn run_service_hooked<S>(
     mut hook: impl FnMut(&ServiceEvent<S>) + Send + 'static,
 ) -> (ServiceSignal<S>, guido::prelude::Service<S::Command>)
