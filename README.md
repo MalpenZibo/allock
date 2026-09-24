@@ -45,6 +45,28 @@ every key is optional and shown with its default.
 The layout is fixed. The config chooses colours, wallpaper, clock format, which
 indicators appear and which monitors show the controls.
 
+## 🔑 Authentication
+
+The lock screen checks your password through PAM, with the policy in
+`/etc/pam.d/allock` that `scripts/install.sh` installs. Without it allock
+borrows `system-auth`, `common-auth` or `login`, in that order, and says so in
+its log. With none of them it refuses to lock, rather than lock you out.
+
+The policy includes only `system-auth`: the password check (`pam_unix`) and the
+limit on wrong attempts (`pam_faillock`). It leaves out the checks for a new
+login, like `/etc/nologin` or a shell missing from `/etc/shells`, which would
+otherwise keep you out of a session that is already running.
+
+Wrong passwords count: by default three in fifteen minutes lock the account for
+ten (`/etc/security/faillock.conf`). A fingerprint still unlocks, because it is
+checked by fprintd outside PAM. `faillock --user $USER --reset`, as root, clears
+the count.
+
+With `fingerprint = true` (the default) the fingerprint works alongside the
+password: either one unlocks. Set it to `false` to require the password. The
+greeter always asks for the password, and greetd checks it with its own policy,
+`/etc/pam.d/greetd`.
+
 ## 🔒 Lock screen
 
 ```sh
