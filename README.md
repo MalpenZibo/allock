@@ -12,6 +12,14 @@
 > [!NOTE]
 > This project has been developed with the assistance of AI.
 
+<p align="center">
+  <img src="assets/screenshots/lock.webp" alt="The lock screen" width="100%">
+</p>
+<p align="center">
+  <img src="assets/screenshots/greeter.webp" alt="The greeter, with its session picker" width="49%">
+  <img src="assets/screenshots/polkit.webp" alt="The polkit dialog" width="49%">
+</p>
+
 ## ✨ Features
 
 - Lock screen through `ext-session-lock-v1`, one surface per monitor, hotplug included
