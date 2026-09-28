@@ -11,7 +11,7 @@ name = "allock"
 path = "src/main.rs"
 
 [dependencies]
-guido = "0.9"
+guido = { git = "https://github.com/MalpenZibo/guido", branch = "main" }
 
 # UI / runtime
 chrono = { version = "0.4", default-features = false, features = ["clock", "unstable-locales"] }
