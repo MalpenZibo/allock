@@ -1,20 +1,24 @@
-//! allock — a lock screen and greetd greeter.
+//! allock — a lock screen, a greetd greeter and a polkit agent.
 //!
-//! One binary, two modes:
+//! One binary, three modes:
 //!
 //! - **lock** (default): takes an `ext-session-lock-v1` lock, puts a surface
 //!   on every output, authenticates through PAM, and exits once the
 //!   compositor confirms the session is unlocked.
 //! - **greeter** (`--greeter`): a fullscreen overlay layer surface per output
 //!   that authenticates through greetd and starts the chosen session.
+//! - **polkit** (`--polkit`): a resident polkit authentication agent that
+//!   shows a modal dialog for each request (see [`agent`]).
 //!
 //! The look is not configurable the way hyprlock's is — the layout is decided
 //! here and the config only chooses colours, wallpaper, clock format and
 //! which indicators appear.
 
+mod agent;
 mod auth;
 mod components;
 mod config;
+mod faillock;
 mod last_login;
 mod services;
 mod theme;
@@ -48,23 +52,32 @@ pub enum Mode {
     /// keyboard focus on demand rather than exclusively, so it can never trap
     /// the keyboard. It exits on a successful password instead of unlocking.
     Preview,
+    /// The polkit agent's dialog.
+    Polkit,
 }
 
 #[derive(Parser, Debug)]
-#[command(version, about = "Lock screen and greetd greeter for Wayland")]
+#[command(
+    version,
+    about = "Lock screen, greetd greeter and polkit agent for Wayland"
+)]
 struct Args {
     /// Path to the config file (default `~/.config/allock/config.toml`)
     #[arg(short, long)]
     config_path: Option<String>,
 
     /// Run as a greetd greeter instead of a session lock.
-    #[arg(long, conflicts_with = "preview")]
+    #[arg(long, conflicts_with_all = ["preview", "polkit"])]
     greeter: bool,
 
     /// Draw the lock screen without locking the session, for trying out a
     /// theme. Authenticating exits instead of unlocking; kill it any time.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "polkit")]
     preview: bool,
+
+    /// Run as the session's polkit authentication agent, until killed.
+    #[arg(long)]
+    polkit: bool,
 }
 
 /// Set when the compositor refuses the lock, so the exit code says so. A
@@ -85,9 +98,10 @@ async fn main() {
         0 => Ok(()),
         _ => Err(std::io::Error::last_os_error()),
     };
-    let mode = match (args.greeter, args.preview) {
-        (true, _) => Mode::Greeter,
-        (_, true) => Mode::Preview,
+    let mode = match (args.greeter, args.preview, args.polkit) {
+        (true, _, _) => Mode::Greeter,
+        (_, true, _) => Mode::Preview,
+        (_, _, true) => Mode::Polkit,
         _ => Mode::Lock,
     };
 
@@ -121,8 +135,9 @@ async fn main() {
                 std::process::exit(1);
             }
         },
-        // greetd runs the PAM stack on its side of the socket.
-        Mode::Greeter => String::new(),
+        // greetd runs the PAM stack on its side of the socket, polkit's
+        // helper on its side of its own.
+        Mode::Greeter | Mode::Polkit => String::new(),
     };
 
     let theme = theme::init(&config.appearance);
@@ -132,7 +147,7 @@ async fn main() {
     let sessions: Rc<Vec<SessionDef>> = Rc::new(match mode {
         Mode::Greeter if config.greeter.sessions.is_empty() => config::scan_sessions(),
         Mode::Greeter => config.greeter.sessions.clone(),
-        Mode::Lock | Mode::Preview => Vec::new(),
+        Mode::Lock | Mode::Preview | Mode::Polkit => Vec::new(),
     });
     if mode == Mode::Greeter && sessions.is_empty() {
         log::error!(
@@ -156,6 +171,10 @@ async fn main() {
     if let Some(family) = &config.appearance.font_name {
         app = app.default_font_family(FontFamily::name(family));
     }
+    // The agent spends its life between dialogs, with nothing on screen.
+    if mode == Mode::Polkit {
+        app = app.quit_on_last_surface(false);
+    }
 
     let config = Rc::new(config);
     // `app` goes unused inside the closure: every mode spawns its surfaces from
@@ -166,6 +185,7 @@ async fn main() {
             run_pam_screen(config.clone(), theme, sessions.clone(), pam_service, mode)
         }
         Mode::Greeter => run_greeter(config.clone(), theme, sessions.clone()),
+        Mode::Polkit => agent::run(config.clone(), theme),
     });
 
     match reason {
@@ -174,6 +194,7 @@ async fn main() {
             std::process::exit(1);
         }
         _ if LOCK_REFUSED.load(Ordering::SeqCst) => std::process::exit(1),
+        _ if agent::REGISTRATION_FAILED.load(Ordering::SeqCst) => std::process::exit(1),
         _ => {}
     }
 }

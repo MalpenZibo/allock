@@ -1,11 +1,12 @@
 //! Authentication, modelled as a conversation.
 //!
-//! PAM and greetd both work the same way: the backend asks something
-//! ("Password:", "Enter TOTP"), the user answers, and the backend either
-//! accepts, asks again, or fails. Modelling both as a stream of [`AuthEvent`]
-//! driven by [`AuthCommand`] means the lock screen and the greeter share one
-//! UI and one state machine, and the fingerprint reader plugs into the same
-//! event stream as a second, parallel producer.
+//! PAM, greetd and polkit's helper all work the same way: the backend asks
+//! something ("Password:", "Enter TOTP"), the user answers, and the backend
+//! either accepts, asks again, or fails. Modelling them as a stream of
+//! [`AuthEvent`] driven by [`AuthCommand`] means the lock screen, the greeter
+//! and the polkit dialog share one UI and one state machine, and the
+//! fingerprint reader plugs into the same event stream as a second, parallel
+//! producer.
 //!
 //! **Fail closed.** [`AuthState::authenticated`] is set in exactly one place:
 //! on [`AuthEvent::Success`]. A backend that crashes, a channel that closes,
@@ -15,9 +16,11 @@
 pub mod fingerprint;
 pub mod greetd;
 pub mod pam;
+pub mod polkit;
 
 use guido::prelude::*;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -31,6 +34,11 @@ use futures::stream::FuturesUnordered;
 pub enum AuthEvent {
     /// The backend wants an answer. `secret` decides whether the field masks.
     Prompt { secret: bool, message: String },
+    /// A question asked before anything was answered, where the user may
+    /// already be typing: polkit's helper asks for the password only once
+    /// the fingerprint reader gives up. Shown like a prompt, but the field
+    /// keeps what is in it — that is the answer being written.
+    Asked { secret: bool, message: String },
     /// Informational text from the auth stack.
     Info(String),
     /// Non-fatal error text from the auth stack.
@@ -74,6 +82,8 @@ pub enum Backend {
     Pam { service: String, user: String },
     /// Greeter: greetd over `$GREETD_SOCK`.
     Greetd { user: Option<String> },
+    /// Polkit dialog: polkit's helper, for the request `cookie` names.
+    Polkit { user: String, cookie: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +154,9 @@ pub struct AuthState {
     /// a new prompt, on success. A `Password` lives on the UI thread, so the
     /// task asks rather than clears.
     wipes: RwSignal<u32>,
+    /// What to say about a `pam_faillock` lock on the account, as far as
+    /// [`crate::faillock`] can tell ahead of PAM: a warning, never a gate.
+    pub locked: RwSignal<Option<String>>,
     /// The last answer given to a *visible* prompt. In both flows we drive,
     /// the only thing ever asked in the clear is a user name — the greeter
     /// uses this to show who is signing in.
@@ -163,6 +176,7 @@ impl AuthState {
             input: create_signal(String::new()),
             password: create_password(),
             wipes: create_signal(0),
+            locked: create_signal(None),
             visible_answer: create_signal(None),
         }
     }
@@ -311,6 +325,13 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let session_accepted_w = state.session_accepted.writer();
     let fingerprint_w = state.fingerprint.writer();
     let wipes_w = state.wipes.writer();
+    let locked_w = state.locked.writer();
+    // The account whose tally to read. The greeter's changes with the picker
+    // and greetd runs its stack for whoever is typed, so it has none.
+    let tally_user = match &backend {
+        Backend::Pam { user, .. } | Backend::Polkit { user, .. } => Some(user.clone()),
+        Backend::Greetd { .. } => None,
+    };
 
     // The task's requests to empty the field, carried out on the UI thread,
     // where the `Password` lives. The first run is the count at zero.
@@ -346,6 +367,11 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
         // Likewise the only writer of the wipe count.
         let mut wipes = 0u32;
 
+        // When to read the tally again: at once, then when what the screen
+        // says about a lock changes, and after every refusal. Never without
+        // an account to read it for.
+        let mut lock_check = tally_user.as_ref().map(|_| Instant::now());
+
         loop {
             tokio::select! {
                 Some(command) = ui_rx.recv() => {
@@ -367,6 +393,9 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                             busy_w.set(false);
                             prompt_w.set(Some(Prompt { secret, message }));
                         }
+                        AuthEvent::Asked { secret, message } => {
+                            prompt_w.set(Some(Prompt { secret, message }));
+                        }
                         AuthEvent::Info(text) => {
                             notice_w.set(Some(Notice { level: NoticeLevel::Info, text }));
                         }
@@ -380,6 +409,9 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                             notice_w.set(Some(Notice { level: NoticeLevel::Error, text }));
                             rejections += 1;
                             rejections_w.set(rejections);
+                            if tally_user.is_some() {
+                                lock_check = Some(Instant::now());
+                            }
                         }
                         AuthEvent::Rejected => {
                             rejections += 1;
@@ -399,6 +431,16 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                         }
                         AuthEvent::SessionAccepted => session_accepted_w.set(true),
                     }
+                }
+                _ = tokio::time::sleep_until(lock_check.unwrap_or_else(Instant::now)),
+                    if lock_check.is_some() =>
+                {
+                    let now = std::time::SystemTime::now();
+                    let lock = tally_user.as_deref().and_then(crate::faillock::status);
+                    locked_w.set(lock.map(|lock| lock.describe(now)));
+                    lock_check = lock
+                        .and_then(|lock| lock.next_change(now))
+                        .map(|wait| Instant::now() + wait);
                 }
                 // Polled here, where it is owned; a finished reader has
                 // nothing left to say.
@@ -426,6 +468,7 @@ impl Backend {
         match self {
             Backend::Pam { service, user } => pam::run(service, user, cmd_rx, event_tx).await,
             Backend::Greetd { user } => greetd::run(user, cmd_rx, event_tx).await,
+            Backend::Polkit { user, cookie } => polkit::run(user, cookie, cmd_rx, event_tx).await,
         }
     }
 }

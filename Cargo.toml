@@ -1,6 +1,6 @@
 [package]
 name = "allock"
-description = "A lock screen and greetd greeter for Wayland"
+description = "A lock screen, greetd greeter and polkit agent for Wayland"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"

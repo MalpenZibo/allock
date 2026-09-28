@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build allock and install it system-wide.
 #
-#   scripts/install.sh            binary + PAM policy (lock screen)
+#   scripts/install.sh            binary, PAM policy (lock screen) and the
+#                                 polkit agent's user service
 #   scripts/install.sh --greeter  also the greeter's own config, wallpaper,
 #                                 cache directory and niri config
 #
@@ -32,7 +33,7 @@ while [[ $# -gt 0 ]]; do
         --force) FORCE=1 ;;
         --prefix) PREFIX="$2"; shift ;;
         --wallpaper) GREETER_WALLPAPER="$2"; shift ;;
-        -h | --help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -78,6 +79,11 @@ else
     sed 's/system-auth/common-auth/' "$REPO/pam/allock" | sudo install -Dm644 /dev/stdin /etc/pam.d/allock
 fi
 echo "    /etc/pam.d/allock"
+
+step "Installing the polkit agent's user service"
+sed "s|@BIN@|$BIN|" "$REPO/systemd/allock-polkit.service" |
+    sudo install -Dm644 /dev/stdin "$PREFIX/lib/systemd/user/allock-polkit.service"
+echo "    $PREFIX/lib/systemd/user/allock-polkit.service (not enabled)"
 
 if ! fc-list | grep -qi "Symbols Nerd Font"; then
     echo "    note: no 'Symbols Nerd Font' installed; icons will render as boxes"

@@ -12,6 +12,7 @@
 //! on a screen that is no longer there.
 
 pub mod clock;
+pub mod dialog;
 pub mod form;
 pub mod picker;
 pub mod status;
@@ -50,8 +51,13 @@ pub struct Screen {
 }
 
 impl Screen {
+    /// The picture behind the screen. The polkit dialog has none: it sits
+    /// over the session, and the wallpaper is the lock screen's.
     fn wallpaper(&self) -> Option<std::path::PathBuf> {
-        self.config.background.resolved_path()
+        match self.mode {
+            Mode::Polkit => None,
+            _ => self.config.background.resolved_path(),
+        }
     }
 }
 
@@ -99,7 +105,7 @@ pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
         // The lock screen is typed at, and a pointer over it is only in the
         // way; the password field still shows its I-beam under the pointer.
         .cursor(match screen.mode {
-            Mode::Greeter => CursorIcon::Default,
+            Mode::Greeter | Mode::Polkit => CursorIcon::Default,
             Mode::Lock | Mode::Preview => CursorIcon::Hidden,
         })
         .layout(ZStack::new())
@@ -230,6 +236,25 @@ fn scrim(screen: &Screen) -> Option<Container> {
 /// composited underneath for `ext-background-effect-v1` to reach.
 pub fn card_surface(screen: &Screen) -> Container {
     let theme = screen.theme;
+
+    // The polkit dialog floats over the session, which the compositor draws:
+    // the blur is asked of it, and the card is as translucent as it is over
+    // the wallpaper.
+    if screen.mode == Mode::Polkit {
+        let card = container()
+            .overflow(Overflow::Hidden)
+            .layout(ZStack::new())
+            .background(with_alpha(
+                theme.background_weak,
+                theme.opacity * screen.config.background.card_opacity.clamp(0.0, 1.0),
+            ));
+        return if screen.config.background.blur > 0.0 {
+            card.backdrop_blur(BackdropBlur::new(0.0).sources(BackdropSources::COMPOSITOR))
+        } else {
+            card
+        };
+    }
+
     let has_wallpaper = screen.wallpaper().is_some();
 
     // With no wallpaper there is nothing behind the card to reveal, so it

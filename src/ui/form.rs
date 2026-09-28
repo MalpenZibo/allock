@@ -40,7 +40,7 @@ const SPINNER_SCALE: f32 = 0.918;
 
 /// Exact, not a minimum: under the centring column a minimum width grows to
 /// fill the output, and the card grows with it into a full-width band.
-const FIELD_WIDTH: f32 = 360.0;
+pub(super) const FIELD_WIDTH: f32 = 360.0;
 const AVATAR_SIZE: f32 = 76.0;
 
 /// The glyph beside the fingerprint hint, and the spinner that stands in for
@@ -147,7 +147,13 @@ pub fn view(screen: Screen) -> Container {
         .child(notice(&screen))
         .child(fingerprint_hint(&screen));
 
-    super::card_surface(&screen)
+    card(&screen, content)
+}
+
+/// The card the form sits on, lifted off the backdrop and shaken by a refusal.
+/// The polkit dialog is one too.
+pub(super) fn card(screen: &Screen, content: Container) -> Container {
+    super::card_surface(screen)
         .corners(Corners::squircle(22.0))
         .shadow(CARD_SHADOW)
         // Turned about its own centre, which is the default pivot. Played by
@@ -243,7 +249,7 @@ fn name(screen: &Screen) -> Text {
 /// does not want. With no caret, the border is the only thing that says where
 /// the keys are going, which matters on a second monitor: it draws the same
 /// form, and does not hold the focus.
-fn field(screen: &Screen) -> Container {
+pub(super) fn field(screen: &Screen) -> Container {
     let theme = screen.theme;
     let auth = screen.auth;
     let state = auth.state;
@@ -251,7 +257,7 @@ fn field(screen: &Screen) -> Container {
     // field would bring it back as an I-beam: a caret-less masked field has
     // nothing a click could place. The greeter keeps it, for the user name.
     let pointer = match screen.mode {
-        Mode::Greeter => CursorIcon::Text,
+        Mode::Greeter | Mode::Polkit => CursorIcon::Text,
         Mode::Lock | Mode::Preview => CursorIcon::Hidden,
     };
 
@@ -390,26 +396,22 @@ fn notice(screen: &Screen) -> Container {
         .height(20.0)
         .layout(Flex::column().main_alignment(MainAlignment::Center))
         .child(move || {
-            match state.notice.get().filter(|n| !n.text.is_empty()) {
-                Some(n) => Some(
-                    text(n.text)
-                        .font_size(13.0)
-                        .color(match n.level {
-                            NoticeLevel::Error => theme.danger,
-                            NoticeLevel::Info => theme.text_weak,
-                        })
-                        .nowrap(),
-                ),
+            let notice = state.notice.get().filter(|n| !n.text.is_empty());
+            let line = |words: String, color: Color| {
+                Some(text(words).font_size(13.0).color(color).nowrap())
+            };
+            match notice {
+                Some(n) if n.level == NoticeLevel::Error => line(n.text, theme.danger),
                 // The line the answer will land on, saying that it is coming.
                 // PAM takes its time over a wrong password on purpose, and an
                 // empty line for those two seconds reads as an Enter that went
                 // nowhere — then the refusal appears out of nothing.
-                None if state.busy.get() => Some(
-                    text("Checking…")
-                        .font_size(13.0)
-                        .color(theme.text_weak)
-                        .nowrap(),
-                ),
+                _ if state.busy.get() => line("Checking…".to_owned(), theme.text_weak),
+                // A lock is said before the password is typed, not after: PAM
+                // would only say so once it had been. A forecast, so the field
+                // stays open — see `crate::faillock`.
+                _ if let Some(locked) = state.locked.get() => line(locked, theme.warning),
+                Some(n) => line(n.text, theme.text_weak),
                 None => None,
             }
         })

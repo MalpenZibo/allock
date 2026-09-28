@@ -4,7 +4,7 @@
     <img src="assets/wordmark-light.svg" alt="allock" height="140">
   </picture>
 </h1>
-<p align="center">A lock screen and greetd greeter for Wayland.</p>
+<p align="center">A lock screen, greetd greeter and polkit agent for Wayland.</p>
 <p align="center">
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue"></a>
 </p>
@@ -16,6 +16,7 @@
 
 - Lock screen through `ext-session-lock-v1`, one surface per monitor, hotplug included
 - greetd greeter with a user picker and a session picker
+- polkit agent, with the lock screen's card as its dialog
 - Password through PAM, fingerprint through fprintd (lock screen only)
 - Wallpaper with blur and dim, frosted cards, and a clock
 - Battery indicator
@@ -31,7 +32,8 @@ scripts/install.sh --greeter   # lock screen and greeter
 ```
 
 The script builds allock, installs it to `/usr/local/bin` and installs the PAM
-policy `pam/allock` to `/etc/pam.d/allock`. Icons need the `Symbols Nerd Font`.
+policy `pam/allock` to `/etc/pam.d/allock` and the polkit agent's user service
+`allock-polkit.service`, not enabled. Icons need the `Symbols Nerd Font`.
 
 See [docs/SETUP.md](docs/SETUP.md) to use it as your lock screen and as your
 login screen.
@@ -60,7 +62,9 @@ otherwise keep you out of a session that is already running.
 Wrong passwords count: by default three in fifteen minutes lock the account for
 ten (`/etc/security/faillock.conf`). A fingerprint still unlocks, because it is
 checked by fprintd outside PAM. `faillock --user $USER --reset`, as root, clears
-the count.
+the count. While the account is locked, the lock screen and the polkit dialog
+say so as soon as they appear, and for how long, reading the count the way
+`faillock` does. It is a warning: the field stays open, and PAM decides.
 
 With `fingerprint = true` (the default) the fingerprint works alongside the
 password: either one unlocks. Set it to `false` to require the password. The
@@ -91,3 +95,25 @@ user = "greeter"
 
 The greeter's own options go in `/etc/greetd/allock.toml` under `[greeter]`.
 [docs/SETUP.md](docs/SETUP.md) has the details.
+
+## 🛡️ Polkit agent
+
+`allock --polkit` is the authentication agent for your session: when a program
+asks polkit for permission (`pkexec`, a disk to mount, a system setting), it
+shows the lock screen's card on a dimmed screen with what is being asked. The
+dialog is modal: it keeps the keyboard until you answer, or cancel with
+Escape.
+
+It runs as a user service, instead of any other agent (only one can hold a
+session):
+
+```kdl
+// ~/.config/niri/config.kdl
+spawn-at-startup "systemctl" "--user" "start" "allock-polkit"
+```
+
+polkit checks the password itself, with `/etc/pam.d/polkit-1`, through its
+helper. allock only passes the answers on, so the policy there decides what
+works: with `pam_fprintd` in it, the dialog asks for your finger first. Typing
+the password still works while it waits, and is checked once the reader gives
+up (`pam_fprintd`'s `timeout=` option sets how long that takes).
