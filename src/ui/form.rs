@@ -7,7 +7,7 @@ use super::Screen;
 use crate::Mode;
 use crate::auth::{FingerprintState, NoticeLevel};
 use crate::components::icons::{IconKind, icon};
-use crate::theme::with_alpha;
+use crate::theme::{ThemeColors, with_alpha};
 
 // Codepoints verified against SymbolsNerdFont-Regular's cmap, not guessed:
 // the neighbourhood is dense and wrong-but-present glyphs render silently.
@@ -417,54 +417,72 @@ fn notice(screen: &Screen) -> Container {
         })
 }
 
+/// How long the fingerprint line takes to open or close.
+const HINT_REVEAL_MS: f32 = 250.0;
+
+/// The fingerprint line, under the field.
+///
+/// It appears a moment after the screen does — fprintd answers over D-Bus, and
+/// until then there is nothing to invite — and it goes if the reader does. So
+/// its box follows the line with an eased height rather than jumping to it:
+/// the card grows and the block around it glides instead of shifting, with no
+/// height written down anywhere. The box clips what it has not yet opened to,
+/// and the line fades in as it is uncovered.
 fn fingerprint_hint(screen: &Screen) -> Container {
     let theme = screen.theme;
     let state = screen.auth.state;
+    let reveal = || Transition::new(HINT_REVEAL_MS, TimingFunction::EaseInOut);
 
-    container().child(move || {
-        let fingerprint = state.fingerprint.get();
-        if fingerprint == FingerprintState::Unavailable {
-            return None;
-        }
+    // Whether there is a line at all, apart from what it says: the line is
+    // built, and fades in, once per appearance, and a change of message only
+    // redraws what is inside it.
+    let shown = create_memo(move || state.fingerprint.get() != FingerprintState::Unavailable);
 
-        let reading = fingerprint == FingerprintState::Reading;
-        let (message, color) = match &fingerprint {
-            FingerprintState::Waiting => (
-                "Or touch the fingerprint sensor".to_owned(),
-                theme.text_weak,
-            ),
-            // fprintd says nothing between the touch and the verdict except
-            // `finger-present`, and this is what allock does with it: the
-            // sensor stops asking and starts answering.
-            FingerprintState::Reading => ("Checking your fingerprint…".to_owned(), theme.primary),
-            FingerprintState::Retry(hint) => (hint.clone(), theme.warning),
-            // The reader has stopped answering, and the screen has to say so —
-            // silence reads as a broken sensor.
-            FingerprintState::Exhausted => (
-                "Too many fingerprint attempts — use your password".to_owned(),
-                theme.text_weak,
-            ),
-            FingerprintState::Unavailable => unreachable!("filtered above"),
-        };
+    container()
+        .height(Length::default().transition(reveal()))
+        .overflow(Overflow::Hidden)
+        .child(move || {
+            shown.get().then(|| {
+                container()
+                    .layout(
+                        Flex::row()
+                            .spacing(7.0)
+                            .cross_alignment(CrossAlignment::Baseline),
+                    )
+                    .opacity(1.0.transition(reveal()).entering_from(0.0))
+                    .children(move || hint_line(theme, state.fingerprint.get()))
+            })
+        })
+}
 
-        Some(
-            container()
-                .layout(
-                    Flex::row()
-                        .spacing(7.0)
-                        .cross_alignment(CrossAlignment::Baseline),
-                )
-                // The same swap the submit arrow makes, for the same reason:
-                // the touch is answered where the touch was invited.
-                .child(turning_glyph(
-                    FINGERPRINT_GLYPH,
-                    HINT_GLYPH_SIZE,
-                    color,
-                    reading,
-                ))
-                .child(text(message).font_size(13.0).color(color).nowrap()),
-        )
-    })
+/// The glyph and the words for one fingerprint state; nothing when there is
+/// no reader to invite.
+fn hint_line(theme: ThemeColors, fingerprint: FingerprintState) -> Vec<Container> {
+    let reading = fingerprint == FingerprintState::Reading;
+    let (message, color) = match &fingerprint {
+        FingerprintState::Waiting => (
+            "Or touch the fingerprint sensor".to_owned(),
+            theme.text_weak,
+        ),
+        // fprintd says nothing between the touch and the verdict except
+        // `finger-present`, and this is what allock does with it: the
+        // sensor stops asking and starts answering.
+        FingerprintState::Reading => ("Checking your fingerprint…".to_owned(), theme.primary),
+        FingerprintState::Retry(hint) => (hint.clone(), theme.warning),
+        // The reader has stopped answering, and the screen has to say so —
+        // silence reads as a broken sensor.
+        FingerprintState::Exhausted => (
+            "Too many fingerprint attempts — use your password".to_owned(),
+            theme.text_weak,
+        ),
+        FingerprintState::Unavailable => return Vec::new(),
+    };
+    vec![
+        // The same swap the submit arrow makes, for the same reason: the
+        // touch is answered where the touch was invited.
+        turning_glyph(FINGERPRINT_GLYPH, HINT_GLYPH_SIZE, color, reading),
+        container().child(text(message).font_size(13.0).color(color).nowrap()),
+    ]
 }
 
 fn prompt_label(prompt: &Option<crate::auth::Prompt>) -> String {
