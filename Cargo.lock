@@ -946,8 +946,9 @@ dependencies = [
 
 [[package]]
 name = "guido"
-version = "0.9.0"
-source = "git+https://github.com/MalpenZibo/guido?branch=main#083ec6bfce70e1dd154870bb1a6a3077899afddb"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68c7c72168b375049359860ad1de1a7c2865aee530defc0fd2b78ecebb0ee466"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
@@ -972,8 +973,9 @@ dependencies = [
 
 [[package]]
 name = "guido-macros"
-version = "0.9.0"
-source = "git+https://github.com/MalpenZibo/guido?branch=main#083ec6bfce70e1dd154870bb1a6a3077899afddb"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a50e9b7529ca8fc6b0c79d5daabbf028adc1809b90c6e0031cf18347cc88724"
 dependencies = [
  "proc-macro2",
  "quote",
