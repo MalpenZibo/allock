@@ -27,13 +27,18 @@
 ## 🛠️ Install
 
 ```sh
-scripts/install.sh             # lock screen
-scripts/install.sh --greeter   # lock screen and greeter
+scripts/install.sh             # lock screen (the default)
+scripts/install.sh --greeter   # greeter
+scripts/install.sh --polkit    # polkit agent
+scripts/install.sh --all       # all three
 ```
 
-The script builds allock, installs it to `/usr/local/bin` and installs the PAM
-policy `pam/allock` to `/etc/pam.d/allock` and the polkit agent's user service
-`allock-polkit.service`, not enabled. Icons need the `Symbols Nerd Font`.
+Modes combine: `scripts/install.sh --lock --polkit`.
+
+The script builds allock and installs it to `/usr/local/bin`, then what each
+mode needs: the PAM policy `pam/allock` to `/etc/pam.d/allock` for the lock
+screen, the greeter's config under `/etc/greetd`, and the polkit agent's user
+service `allock-polkit.service`, not enabled. Icons need the `Symbols Nerd Font`.
 
 See [docs/SETUP.md](docs/SETUP.md) to use it as your lock screen and as your
 login screen.

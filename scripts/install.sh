@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
-# Build allock and install it system-wide.
+# Build allock and install it system-wide, with what each mode needs.
 #
-#   scripts/install.sh            binary, PAM policy (lock screen) and the
-#                                 polkit agent's user service
-#   scripts/install.sh --greeter  also the greeter's own config, wallpaper,
-#                                 cache directory and niri config
+#   scripts/install.sh                    the lock screen (the default)
+#   scripts/install.sh --greeter          the greeter
+#   scripts/install.sh --polkit           the polkit agent
+#   scripts/install.sh --lock --polkit    modes combine
+#   scripts/install.sh --all              all three
+#
+# The binary is always installed. The lock screen adds its PAM policy, the
+# greeter its own config, wallpaper, cache directory and niri config, the
+# polkit agent its user service (not enabled).
 #
 # Run it as yourself, not as root: it builds with your toolchain and asks sudo
 # only for the steps that write outside your home. It never edits
 # /etc/greetd/config.toml or your own configs, see docs/SETUP.md for those.
 #
 # Options:
-#   --greeter    install the greeter files as well
+#   --lock       install the lock screen
+#   --greeter    install the greeter
+#   --polkit     install the polkit agent
+#   --all        install all three
 #   --force      overwrite greeter files that already exist
 #   --prefix P   install under P instead of /usr/local
 #   --wallpaper F  the greeter's wallpaper (default: GREETER_WALLPAPER below)
@@ -24,20 +32,30 @@ PREFIX=/usr/local
 # second library in step with it is not worth it. Falls back to the
 # `[background] path` of your allock config when this file is missing.
 GREETER_WALLPAPER="$HOME/.config/niri-wallpaper/library/Abstract - Nature.jpg"
+LOCK=0
 GREETER=0
+POLKIT=0
 FORCE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --lock) LOCK=1 ;;
         --greeter) GREETER=1 ;;
+        --polkit) POLKIT=1 ;;
+        --all) LOCK=1 GREETER=1 POLKIT=1 ;;
         --force) FORCE=1 ;;
         --prefix) PREFIX="$2"; shift ;;
         --wallpaper) GREETER_WALLPAPER="$2"; shift ;;
-        -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
 done
+
+# No mode named: the lock screen, which is what most installs are for.
+if [[ $LOCK -eq 0 && $GREETER -eq 0 && $POLKIT -eq 0 ]]; then
+    LOCK=1
+fi
 
 if [[ $EUID -eq 0 ]]; then
     echo "Run this as your own user; it uses sudo where it needs root." >&2
@@ -64,6 +82,18 @@ put() {
     echo "    wrote $dest"
 }
 
+# Checked before building, so a missing dependency does not cost a build.
+if [[ $GREETER -eq 1 ]]; then
+    if ! id greeter >/dev/null 2>&1; then
+        echo "No 'greeter' user: install greetd first (it creates one)." >&2
+        exit 1
+    fi
+    if ! command -v niri >/dev/null; then
+        echo "The greeter runs inside niri, which is not installed." >&2
+        exit 1
+    fi
+fi
+
 step "Building (release)"
 cargo build --release --manifest-path "$REPO/Cargo.toml"
 
@@ -71,92 +101,103 @@ step "Installing the binary"
 sudo install -Dm755 "$REPO/target/release/allock" "$BIN"
 echo "    $BIN"
 
-step "Installing the PAM policy"
-if [[ -e /etc/pam.d/system-auth ]]; then
-    sudo install -Dm644 "$REPO/pam/allock" /etc/pam.d/allock
-else
-    # Debian and derivatives name the shared stack common-auth.
-    sed 's/system-auth/common-auth/' "$REPO/pam/allock" | sudo install -Dm644 /dev/stdin /etc/pam.d/allock
-fi
-echo "    /etc/pam.d/allock"
-
-step "Installing the polkit agent's user service"
-sed "s|@BIN@|$BIN|" "$REPO/systemd/allock-polkit.service" |
-    sudo install -Dm644 /dev/stdin "$PREFIX/lib/systemd/user/allock-polkit.service"
-echo "    $PREFIX/lib/systemd/user/allock-polkit.service (not enabled)"
-
 if ! fc-list | grep -qi "Symbols Nerd Font"; then
     echo "    note: no 'Symbols Nerd Font' installed; icons will render as boxes"
 fi
 
-if [[ $GREETER -eq 0 ]]; then
-    printf '\nDone. Lock mode is ready: run `allock --preview` to try it, then see docs/SETUP.md.\n'
-    exit 0
+# What to tell the user at the end, one paragraph per mode installed.
+NEXT=()
+
+# ---------------------------------------------------------------------------
+# Lock screen
+# ---------------------------------------------------------------------------
+
+if [[ $LOCK -eq 1 ]]; then
+    step "Installing the lock screen's PAM policy"
+    if [[ -e /etc/pam.d/system-auth ]]; then
+        sudo install -Dm644 "$REPO/pam/allock" /etc/pam.d/allock
+    else
+        # Debian and derivatives name the shared stack common-auth.
+        sed 's/system-auth/common-auth/' "$REPO/pam/allock" | sudo install -Dm644 /dev/stdin /etc/pam.d/allock
+    fi
+    echo "    /etc/pam.d/allock"
+
+    NEXT+=("Lock screen: run \`allock --preview\` to try it, then bind \`allock\` to a key
+and to your idle daemon. See docs/SETUP.md.")
+fi
+
+# ---------------------------------------------------------------------------
+# Polkit agent
+# ---------------------------------------------------------------------------
+
+if [[ $POLKIT -eq 1 ]]; then
+    # polkit checks the password itself, with /etc/pam.d/polkit-1: the agent
+    # needs no PAM policy of its own.
+    step "Installing the polkit agent's user service"
+    sed "s|@BIN@|$BIN|" "$REPO/systemd/allock-polkit.service" |
+        sudo install -Dm644 /dev/stdin "$PREFIX/lib/systemd/user/allock-polkit.service"
+    echo "    $PREFIX/lib/systemd/user/allock-polkit.service (not enabled)"
+
+    NEXT+=("Polkit agent: stop any other agent, then start it from your session, e.g. in niri
+    spawn-at-startup \"systemctl\" \"--user\" \"start\" \"allock-polkit\"
+or run: systemctl --user enable --now allock-polkit")
 fi
 
 # ---------------------------------------------------------------------------
 # Greeter
 # ---------------------------------------------------------------------------
 
-if ! id greeter >/dev/null 2>&1; then
-    echo "No 'greeter' user: install greetd first (it creates one)." >&2
-    exit 1
-fi
-if ! command -v niri >/dev/null; then
-    echo "The greeter runs inside niri, which is not installed." >&2
-    exit 1
-fi
+if [[ $GREETER -eq 1 ]]; then
+    USER_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/allock/config.toml"
+    NIRI_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/niri/config.kdl"
 
-USER_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/allock/config.toml"
-NIRI_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/niri/config.kdl"
+    # The first `key = "value"` or `key = { ... }` line in a TOML file, verbatim.
+    toml_line() { grep -m1 -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null || true; }
+    # A TOML table verbatim, header included: from `[name]` up to the next header
+    # that is not one of its own subtables.
+    toml_table() {
+        awk -v name="$1" '
+            $0 ~ "^[[:space:]]*\\[" name "\\][[:space:]]*$" { inside = 1; print; next }
+            inside && /^[[:space:]]*\[/ && $0 !~ "^[[:space:]]*\\[" name "\\." { inside = 0 }
+            inside { print }
+        ' "$2" 2>/dev/null || true
+    }
+    # The first quoted value after `key` in a KDL file.
+    kdl_value() { grep -m1 -E "^[[:space:]]*$1[[:space:]]+\"" "$2" 2>/dev/null | sed -E 's/^[^"]*"([^"]*)".*/\1/' || true; }
 
-# The first `key = "value"` or `key = { ... }` line in a TOML file, verbatim.
-toml_line() { grep -m1 -E "^[[:space:]]*$1[[:space:]]*=" "$2" 2>/dev/null || true; }
-# A TOML table verbatim, header included: from `[name]` up to the next header
-# that is not one of its own subtables.
-toml_table() {
-    awk -v name="$1" '
-        $0 ~ "^[[:space:]]*\\[" name "\\][[:space:]]*$" { inside = 1; print; next }
-        inside && /^[[:space:]]*\[/ && $0 !~ "^[[:space:]]*\\[" name "\\." { inside = 0 }
-        inside { print }
-    ' "$2" 2>/dev/null || true
-}
-# The first quoted value after `key` in a KDL file.
-kdl_value() { grep -m1 -E "^[[:space:]]*$1[[:space:]]+\"" "$2" 2>/dev/null | sed -E 's/^[^"]*"([^"]*)".*/\1/' || true; }
+    step "Copying what the greeter cannot read from your home"
+    # The greeter runs as the `greeter` user, whose `~` is not yours: anything the
+    # lock screen reads from your home has to be copied somewhere it can reach.
 
-step "Copying what the greeter cannot read from your home"
-# The greeter runs as the `greeter` user, whose `~` is not yours: anything the
-# lock screen reads from your home has to be copied somewhere it can reach.
+    WALLPAPER_LINE=""
+    wallpaper_src="$GREETER_WALLPAPER"
+    if [[ ! -r "$wallpaper_src" ]]; then
+        wallpaper_src="$(toml_line path "$USER_CONFIG" | sed -E 's/^[^"]*"([^"]*)".*/\1/')"
+        wallpaper_src="${wallpaper_src/#\~/$HOME}"
+    fi
+    if [[ -n "$wallpaper_src" && -r "$wallpaper_src" ]]; then
+        resolved="$(readlink -f "$wallpaper_src")"
+        ext="${resolved##*.}"
+        dest="$SHARE/greeter-wallpaper.${ext,,}"
+        sudo install -Dm644 "$resolved" "$dest"
+        WALLPAPER_LINE="path = \"$dest\""
+        echo "    wallpaper: $resolved -> $dest"
+    else
+        echo "    no readable wallpaper ($GREETER_WALLPAPER, or [background] path in $USER_CONFIG); the greeter uses a plain colour"
+    fi
 
-WALLPAPER_LINE=""
-wallpaper_src="$GREETER_WALLPAPER"
-if [[ ! -r "$wallpaper_src" ]]; then
-    wallpaper_src="$(toml_line path "$USER_CONFIG" | sed -E 's/^[^"]*"([^"]*)".*/\1/')"
-    wallpaper_src="${wallpaper_src/#\~/$HOME}"
-fi
-if [[ -n "$wallpaper_src" && -r "$wallpaper_src" ]]; then
-    resolved="$(readlink -f "$wallpaper_src")"
-    ext="${resolved##*.}"
-    dest="$SHARE/greeter-wallpaper.${ext,,}"
-    sudo install -Dm644 "$resolved" "$dest"
-    WALLPAPER_LINE="path = \"$dest\""
-    echo "    wallpaper: $resolved -> $dest"
-else
-    echo "    no readable wallpaper ($GREETER_WALLPAPER, or [background] path in $USER_CONFIG); the greeter uses a plain colour"
-fi
+    APPEARANCE_BLOCK="$(toml_table appearance "$USER_CONFIG")"
+    if [[ -n "$APPEARANCE_BLOCK" ]]; then
+        echo "    colours: [appearance] from $USER_CONFIG"
+    else
+        echo "    no [appearance] in $USER_CONFIG; the greeter uses the default colours"
+    fi
 
-APPEARANCE_BLOCK="$(toml_table appearance "$USER_CONFIG")"
-if [[ -n "$APPEARANCE_BLOCK" ]]; then
-    echo "    colours: [appearance] from $USER_CONFIG"
-else
-    echo "    no [appearance] in $USER_CONFIG; the greeter uses the default colours"
-fi
+    MAIN_OUTPUT_LINE="$(toml_line main_output "$USER_CONFIG")"
+    [[ -n "$MAIN_OUTPUT_LINE" ]] || MAIN_OUTPUT_LINE='main_output = "All"'
 
-MAIN_OUTPUT_LINE="$(toml_line main_output "$USER_CONFIG")"
-[[ -n "$MAIN_OUTPUT_LINE" ]] || MAIN_OUTPUT_LINE='main_output = "All"'
-
-step "Writing the greeter's allock config"
-put "$GREETD/allock.toml" 644 <<EOF
+    step "Writing the greeter's allock config"
+    put "$GREETD/allock.toml" 644 <<EOF
 # allock's config in greeter mode. Written by scripts/install.sh.
 $MAIN_OUTPUT_LINE
 
@@ -178,20 +219,20 @@ remember = true
 # other_user = false
 EOF
 
-step "Creating the greeter's cache ($GREETER_CACHE)"
-sudo install -d -m700 -o greeter -g greeter "$GREETER_CACHE"
+    step "Creating the greeter's cache ($GREETER_CACHE)"
+    sudo install -d -m700 -o greeter -g greeter "$GREETER_CACHE"
 
-step "Writing the greeter's niri config"
-layout="$(kdl_value layout "$NIRI_CONFIG")"
-options="$(kdl_value options "$NIRI_CONFIG")"
-cursor_theme="$(kdl_value xcursor-theme "$NIRI_CONFIG")"
-CURSOR_BLOCK=""
-if [[ -n "$cursor_theme" && -d "/usr/share/icons/$cursor_theme" ]]; then
-    CURSOR_BLOCK="cursor {
+    step "Writing the greeter's niri config"
+    layout="$(kdl_value layout "$NIRI_CONFIG")"
+    options="$(kdl_value options "$NIRI_CONFIG")"
+    cursor_theme="$(kdl_value xcursor-theme "$NIRI_CONFIG")"
+    CURSOR_BLOCK=""
+    if [[ -n "$cursor_theme" && -d "/usr/share/icons/$cursor_theme" ]]; then
+        CURSOR_BLOCK="cursor {
     xcursor-theme \"$cursor_theme\"
 }"
-fi
-put "$GREETD/allock-niri.kdl" 644 <<EOF
+    fi
+    put "$GREETD/allock-niri.kdl" 644 <<EOF
 // niri hosting allock as the greetd greeter. Written by scripts/install.sh.
 //
 // greetd starts the chosen session only after the greeter process exits, and
@@ -216,17 +257,18 @@ hotkey-overlay {
 
 spawn-sh-at-startup "XDG_CACHE_HOME=$GREETER_CACHE $BIN --greeter -c $GREETD/allock.toml; niri msg action quit --skip-confirmation"
 EOF
-if ! niri validate -c "$GREETD/allock-niri.kdl" >/dev/null 2>&1; then
-    echo "    warning: niri rejects $GREETD/allock-niri.kdl; run: niri validate -c $GREETD/allock-niri.kdl" >&2
+    if ! niri validate -c "$GREETD/allock-niri.kdl" >/dev/null 2>&1; then
+        echo "    warning: niri rejects $GREETD/allock-niri.kdl; run: niri validate -c $GREETD/allock-niri.kdl" >&2
+    fi
+
+    NEXT+=("Greeter: to make it your login screen, set in $GREETD/config.toml
+    [default_session]
+    command = \"systemd-cat -t allock-greeter niri -c $GREETD/allock-niri.kdl\"
+    user = \"greeter\"
+and read docs/SETUP.md about [initial_session] before rebooting.")
 fi
 
-cat <<EOF
-
-Done. To make it your login screen, set in $GREETD/config.toml:
-
-    [default_session]
-    command = "systemd-cat -t allock-greeter niri -c $GREETD/allock-niri.kdl"
-    user = "greeter"
-
-and read docs/SETUP.md about [initial_session] before rebooting.
-EOF
+printf '\nDone.\n'
+for next in "${NEXT[@]}"; do
+    printf '\n%s\n' "$next"
+done
