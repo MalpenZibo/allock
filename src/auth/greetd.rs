@@ -46,13 +46,11 @@ enum Outgoing {
 enum Step {
     /// Send this next, staying in the same greetd session.
     Send(Outgoing),
-    /// Create a new session. greetd has already torn the old one down — this
-    /// is the path after an auth error, where sending `CancelSession` would
-    /// itself be an error.
-    NewSession,
-    /// Cancel the in-flight session first, then create a new one. The path
-    /// when the *user* abandons an attempt: greetd still holds the session
-    /// open and would reject a second `create_session`.
+    /// Cancel the session greetd holds, then create a new one. greetd keeps
+    /// the session under configuration until told otherwise — after the user
+    /// abandons an attempt, and after an error too — and rejects every
+    /// `create_session` meanwhile with "a session is already being
+    /// configured".
     CancelAndRestart,
     /// `CancelAndRestart`, for another account — `None` asks for its name.
     CancelAndSwitch(Option<String>),
@@ -134,7 +132,6 @@ pub async fn run(
 
             match handle(response, &mut authenticated, &mut cmd_rx, &event_tx).await {
                 Step::Send(next_request) => request = next_request,
-                Step::NewSession => continue 'session,
                 Step::CancelAndRestart => {
                     if !cancel(&mut stream, &event_tx).await {
                         return;
@@ -239,10 +236,9 @@ async fn handle(
             let _ = event_tx
                 .send(AuthEvent::Failed("Incorrect password".to_owned()))
                 .await;
-            // greetd cancels the session itself on an error, so going straight
-            // back to CreateSession is right — sending CancelSession as well
-            // would itself be an error.
-            Step::NewSession
+            // greetd keeps the failed session as the one being configured:
+            // it has to be cancelled before the next attempt can start.
+            Step::CancelAndRestart
         }
 
         Response::Error {
@@ -251,7 +247,10 @@ async fn handle(
         } => {
             log::error!("greetd error: {description}");
             let _ = event_tx.send(AuthEvent::Error(description)).await;
-            Step::NewSession
+            // An error that comes back on every attempt would otherwise have
+            // the loop and greetd spinning as fast as they can talk.
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            Step::CancelAndRestart
         }
     }
 }
@@ -283,6 +282,11 @@ async fn ask_username(
 }
 
 /// Cancel the in-flight session. Returns false if the connection is gone.
+///
+/// After an auth error greetd's session worker has already exited, so the
+/// cancel may be answered with an error of its own (the worker's socket is
+/// closed). greetd has dropped the session all the same; only the connection
+/// matters here.
 async fn cancel(stream: &mut UnixStream, event_tx: &mpsc::Sender<AuthEvent>) -> bool {
     if !write(stream, &Request::CancelSession, event_tx).await {
         return false;
