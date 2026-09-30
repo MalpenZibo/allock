@@ -10,8 +10,15 @@
 //!
 //! Everything here fails towards [`FingerprintState::Unavailable`]: no
 //! reader, no enrolled finger, no fprintd, a polkit refusal — all of them
-//! just mean the password is the only way in.
+//! just mean the password is the only way in. But only once it is clear the
+//! failure is not passing: a reader that is busy with a `sudo` in a terminal,
+//! or still waking up with the machine, is tried again a little later, and
+//! every resume from suspend starts it over from scratch.
 
+use std::time::Duration;
+
+use futures::StreamExt;
+use futures::stream::BoxStream;
 use guido::prelude::WriteSignal;
 use tokio::sync::mpsc;
 use zbus::proxy;
@@ -54,34 +61,159 @@ pub trait FprintDevice {
     fn finger_present(&self) -> zbus::Result<bool>;
 }
 
+#[proxy(
+    interface = "org.freedesktop.login1.Manager",
+    default_service = "org.freedesktop.login1",
+    default_path = "/org/freedesktop/login1"
+)]
+trait Login1Manager {
+    #[zbus(signal)]
+    fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
+}
+
+/// How many times in a row the reader may fail before it is left alone until
+/// the next resume. With [`backoff`], a little under a minute: long enough to
+/// outlast a `pam_fprintd` holding the reader for a `sudo` in a terminal.
+const MAX_FAILURES: u32 = 8;
+
 pub async fn run(
     config: FingerprintConfig,
     event_tx: mpsc::Sender<AuthEvent>,
     state: WriteSignal<FingerprintState>,
 ) {
-    match verify_loop(&config, &event_tx, state).await {
-        // The loop settled on a state of its own — `Exhausted` after too many
-        // misses — and it is the one the user has to read. Overwriting it here
-        // was how the screen came to say nothing at all after five wrong
-        // fingers: the reader had given up, and the only sign of it was the
-        // hint vanishing.
-        Ok(Outcome::Settled) => {}
-        Ok(Outcome::Unavailable) => state.set(FingerprintState::Unavailable),
+    let connection = match zbus::Connection::system().await {
+        Ok(connection) => connection,
         Err(e) => {
-            // Not an error the user needs to see: it only means the password
-            // is the only way in, which the UI shows by hiding the hint.
             log::info!("fingerprint unavailable: {e}");
             state.set(FingerprintState::Unavailable);
+            return;
+        }
+    };
+    let mut sleeps = sleep_signals(&connection).await;
+    // Across rounds and restarts alike: a suspend is not a way to more tries.
+    let mut misses = 0;
+    let mut failures = 0;
+
+    loop {
+        let woke = tokio::select! {
+            ended = verify_loop(&connection, &config, &event_tx, state, &mut misses, &mut failures) => {
+                Wake::Ended(ended)
+            }
+            Some(asleep) = sleeps.next() => Wake::Sleep(asleep),
+        };
+
+        match woke {
+            // The loop settled on a state of its own — `Exhausted` after too
+            // many misses — and it is the one the user has to read.
+            // Overwriting it here was how the screen came to say nothing at
+            // all after five wrong fingers: the reader had given up, and the
+            // only sign of it was the hint vanishing.
+            Wake::Ended(Ok(Ended::Settled)) => return,
+            // Nothing will change that while the screen is up: nobody enrolls
+            // a finger through a lock screen.
+            Wake::Ended(Ok(Ended::NoFingers)) => {
+                state.set(FingerprintState::Unavailable);
+                return;
+            }
+            Wake::Ended(Ok(Ended::Broken(reason))) => failures = broke(&reason, failures),
+            Wake::Ended(Err(e)) => failures = broke(&e.to_string(), failures),
+            // The round was dropped, and the claim with it: fprintd cancels
+            // whatever the reader was doing as the machine goes down, and a
+            // loop that restarted it straight away was how 120 "device busy"
+            // errors fitted into the second before the suspend — and how the
+            // last of them was still on screen when the lid opened.
+            Wake::Sleep(true) => {
+                state.set(FingerprintState::Unavailable);
+                until_resumed(&mut sleeps).await;
+                failures = 0;
+                continue;
+            }
+            // Awake without having been seen going to sleep: start over all
+            // the same, the reader may not be the one it was.
+            Wake::Sleep(false) => {
+                failures = 0;
+                continue;
+            }
+        }
+
+        if failures >= MAX_FAILURES {
+            // Not an error the user needs to see: it only means the password
+            // is the only way in, which the UI shows by hiding the hint.
+            log::info!("fingerprint unavailable until the next resume");
+            state.set(FingerprintState::Unavailable);
+            until_resumed(&mut sleeps).await;
+            failures = 0;
+            continue;
+        }
+
+        tokio::select! {
+            () = tokio::time::sleep(backoff(failures)) => {}
+            Some(asleep) = sleeps.next() => {
+                if asleep {
+                    state.set(FingerprintState::Unavailable);
+                    until_resumed(&mut sleeps).await;
+                }
+                failures = 0;
+            }
         }
     }
 }
 
-/// How the loop ended, for the one decision the caller still has to make.
-enum Outcome {
+/// What woke the loop in [`run`].
+enum Wake {
+    Ended(zbus::Result<Ended>),
+    /// logind's `PrepareForSleep`: `true` going down, `false` coming back.
+    Sleep(bool),
+}
+
+/// How one claim of the reader ended.
+enum Ended {
     /// The loop has already set the state the user should see.
     Settled,
-    /// Nothing to verify against — no reader, no enrolled finger, no daemon.
-    Unavailable,
+    /// A reader, but no finger enrolled on it for this user.
+    NoFingers,
+    /// The reader stopped working mid-way; worth trying again.
+    Broken(String),
+}
+
+/// Counts one failure, and says so where someone debugging will look.
+fn broke(reason: &str, failures: u32) -> u32 {
+    log::info!("fingerprint reader failed ({reason}), will retry");
+    failures + 1
+}
+
+/// How long to leave the reader alone after `failures` failures in a row.
+fn backoff(failures: u32) -> Duration {
+    Duration::from_secs(1 << failures.saturating_sub(1).min(3))
+}
+
+/// logind's `PrepareForSleep`, as `true` going down and `false` coming back.
+///
+/// Never ends — without logind it simply never says anything — so a `select!`
+/// on it cannot spin on a stream that has run dry.
+async fn sleep_signals(connection: &zbus::Connection) -> BoxStream<'static, bool> {
+    let signals = match Login1ManagerProxy::new(connection).await {
+        Ok(logind) => logind.receive_prepare_for_sleep().await.ok(),
+        Err(_) => None,
+    };
+    match signals {
+        Some(signals) => signals
+            .filter_map(|signal| async move { signal.args().ok().map(|args| args.start) })
+            .chain(futures::stream::pending())
+            .boxed(),
+        None => {
+            log::debug!("no logind: the reader will not be restarted on resume");
+            futures::stream::pending().boxed()
+        }
+    }
+}
+
+async fn until_resumed(sleeps: &mut BoxStream<'static, bool>) {
+    while let Some(asleep) = sleeps.next().await {
+        if !asleep {
+            return;
+        }
+    }
 }
 
 /// What one `VerifyStatus` means for the screen.
@@ -92,6 +224,9 @@ enum Step {
     Missed,
     /// Something to tell the user about the scan itself.
     Hint(&'static str),
+    /// The reader itself failed — not the scan. Ends the round: fprintd has
+    /// to be given time before it is asked again.
+    Failed,
     Ignored,
 }
 
@@ -103,7 +238,7 @@ fn step_for(result: &str) -> Step {
         "verify-swipe-too-short" => Step::Hint("Swipe was too short"),
         "verify-finger-not-centered" => Step::Hint("Centre your finger"),
         "verify-remove-and-retry" => Step::Hint("Lift your finger and retry"),
-        "verify-disconnected" | "verify-unknown-error" => Step::Hint("Fingerprint reader failed"),
+        "verify-disconnected" | "verify-unknown-error" => Step::Failed,
         _ => Step::Ignored,
     }
 }
@@ -136,17 +271,19 @@ fn hint_for_finger(present: bool, reading: bool) -> Option<FingerprintState> {
 }
 
 async fn verify_loop(
+    connection: &zbus::Connection,
     config: &FingerprintConfig,
     event_tx: &mpsc::Sender<AuthEvent>,
     state: WriteSignal<FingerprintState>,
-) -> zbus::Result<Outcome> {
-    use futures::StreamExt;
-
-    let connection = zbus::Connection::system().await?;
-    let manager = FprintManagerProxy::new(&connection).await?;
+    misses: &mut u32,
+    failures: &mut u32,
+) -> zbus::Result<Ended> {
+    // Asked afresh every time: a reader that went away and came back is a
+    // new object at a new path.
+    let manager = FprintManagerProxy::new(connection).await?;
     let device_path = manager.get_default_device().await?;
 
-    let device: FprintDeviceProxy<'static> = FprintDeviceProxy::builder(&connection)
+    let device: FprintDeviceProxy<'static> = FprintDeviceProxy::builder(connection)
         .path(device_path)?
         .build()
         .await?;
@@ -157,7 +294,7 @@ async fn verify_loop(
         .is_ok_and(|fingers| fingers.is_empty())
     {
         log::info!("no enrolled fingers for {}", config.user);
-        return Ok(Outcome::Unavailable);
+        return Ok(Ended::NoFingers);
     }
 
     // Claiming is exclusive: hold it only while the screen is up. Dropping
@@ -167,17 +304,18 @@ async fn verify_loop(
 
     let mut status = device.receive_verify_status().await?;
     let mut finger = device.receive_finger_present_changed().await;
-    let mut misses = 0;
     // Whether the hint on screen is this scan's and nothing else has replaced
     // it — see `hint_for_finger`.
     let mut reading = false;
 
-    // Said once, before the first finger. Setting it again at the top of every
-    // round is what wiped the answer to the round before it: a hint would
-    // appear for as long as it took fprintd to be asked again, and vanish.
+    // Said once per claim, before the first finger. Setting it again at the
+    // top of every round is what wiped the answer to the round before it: a
+    // hint would appear for as long as it took fprintd to be asked again, and
+    // vanish. After a failure or a resume it is the right thing to wipe: the
+    // reader is listening again.
     state.set(FingerprintState::Waiting);
 
-    while misses < config.retries {
+    while *misses < config.retries {
         device.verify_start("any").await?;
 
         let done = loop {
@@ -196,28 +334,40 @@ async fn verify_loop(
             };
 
             let Some(signal) = status else {
-                return Ok(Outcome::Unavailable);
+                return Ok(Ended::Broken("fprintd went away".to_owned()));
             };
             let Ok(args) = signal.args() else { continue };
 
             log::debug!("fprintd: {} (done={})", args.result, args.done);
 
-            match step_for(&args.result) {
+            let step = step_for(&args.result);
+            if step != Step::Failed {
+                // The reader answered: whatever failed before has passed.
+                *failures = 0;
+            }
+
+            match step {
                 // The only accepting branch in the whole module.
                 Step::Matched => {
                     let _ = event_tx.send(AuthEvent::Success).await;
                     let _ = device.verify_stop().await;
-                    return Ok(Outcome::Settled);
+                    return Ok(Ended::Settled);
                 }
                 Step::Missed => {
-                    misses += 1;
+                    *misses += 1;
                     reading = false;
-                    state.set(FingerprintState::Retry(miss_hint(misses, config.retries)));
+                    state.set(FingerprintState::Retry(miss_hint(*misses, config.retries)));
                     let _ = event_tx.send(AuthEvent::Rejected).await;
                 }
                 Step::Hint(hint) => {
                     reading = false;
                     state.set(FingerprintState::Retry(hint.to_owned()));
+                }
+                // Said while the reader is left alone, and replaced by the
+                // invitation as soon as it is listening again.
+                Step::Failed => {
+                    state.set(FingerprintState::Retry("Fingerprint reader failed".to_owned()));
+                    return Ok(Ended::Broken(args.result.to_string()));
                 }
                 Step::Ignored => {}
             }
@@ -234,7 +384,7 @@ async fn verify_loop(
     }
 
     state.set(FingerprintState::Exhausted);
-    Ok(Outcome::Settled)
+    Ok(Ended::Settled)
 }
 
 /// Releases the device however the loop leaves — including a cancellation of
@@ -320,6 +470,21 @@ mod tests {
             hint_for_finger(false, true),
             Some(FingerprintState::Waiting)
         );
+    }
+
+    /// fprintd answers a reader error with `done`, and asking it again at
+    /// once only earns the same error: before a suspend that was 120 rounds
+    /// in the same second. A failure has to end the round, not hint and loop.
+    #[test]
+    fn a_reader_error_ends_the_round() {
+        assert_eq!(step_for("verify-unknown-error"), Step::Failed);
+        assert_eq!(step_for("verify-disconnected"), Step::Failed);
+    }
+
+    #[test]
+    fn the_reader_is_given_more_time_after_each_failure() {
+        let delays: Vec<u64> = (1..=MAX_FAILURES).map(|n| backoff(n).as_secs()).collect();
+        assert_eq!(delays, [1, 2, 4, 8, 8, 8, 8, 8]);
     }
 
     /// A status allock has never heard of is not a scan result: saying
