@@ -41,6 +41,9 @@ pub struct Screen {
     pub user: RwSignal<Option<UserInfo>>,
     /// `None` when the battery indicator is off or there is no battery.
     pub battery: Option<RwSignal<Option<UPowerService>>>,
+    /// Nobody has touched anything for `[auth] idle_timeout`: the field gives
+    /// way to an invitation to press a key. Never set in the greeter.
+    pub resting: Signal<bool>,
     pub sessions: Rc<Vec<SessionDef>>,
     pub session: picker::Choice,
     /// Greeter only: the accounts offered by the user picker. The picker has

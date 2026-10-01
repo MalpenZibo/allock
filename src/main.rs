@@ -19,6 +19,7 @@ mod auth;
 mod components;
 mod config;
 mod faillock;
+mod idle;
 mod last_login;
 mod services;
 mod theme;
@@ -28,6 +29,7 @@ mod utils;
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use clap::Parser;
 use guido::prelude::*;
@@ -219,9 +221,16 @@ fn run_pam_screen(
     let user = user::current();
     log::info!("authenticating as {}", user.name);
 
+    // One watcher for the form and the reader both: they rest together, so
+    // the screen never invites a finger the reader is not listening for.
+    let idle = (config.auth.idle_timeout > 0)
+        .then(|| Duration::from_secs(config.auth.idle_timeout))
+        .and_then(idle::watch);
+
     let fingerprint = config.auth.fingerprint.then(|| FingerprintConfig {
         user: user.name.clone(),
         retries: config.auth.fingerprint_retries,
+        idle: idle.clone(),
     });
 
     let auth = auth::start(
@@ -238,6 +247,7 @@ fn run_pam_screen(
         mode,
         user: create_signal(Some(user)),
         battery: battery_service(&config),
+        resting: idle::resting(idle),
         sessions,
         session: ui::picker::Choice::new(0),
         users: Rc::new(Vec::new()),
@@ -245,6 +255,14 @@ fn run_pam_screen(
         now: ui::clock::create(),
         config,
     };
+
+    // Half a password is not left in a field nobody is watching.
+    let resting = screen.resting;
+    create_effect(move || {
+        if resting.get() {
+            auth.state.clear_field();
+        }
+    });
 
     if mode == Mode::Preview {
         log::warn!("preview mode: the session is NOT locked");
@@ -360,6 +378,9 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         mode: Mode::Greeter,
         user: create_signal(chosen(preselected_user)),
         battery: battery_service(&config),
+        // Nothing to rest: the greeter has no reader to switch off, and a
+        // login screen is looked at by whoever walks up to it.
+        resting: idle::resting(None),
         sessions: sessions.clone(),
         session: ui::picker::Choice::new(last_login::preselect(
             &sessions,

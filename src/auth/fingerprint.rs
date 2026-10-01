@@ -14,13 +14,20 @@
 //! failure is not passing: a reader that is busy with a `sudo` in a terminal,
 //! or still waking up with the machine, is tried again a little later, and
 //! every resume from suspend starts it over from scratch.
+//!
+//! Nor is the reader kept listening for nobody: a locked machine can sit for
+//! an hour with something holding off the suspend, and a sensor scanning all
+//! that time warms the button it sits in. While the user is idle it is
+//! released, and claimed again at the first key — a touch alone cannot wake
+//! it, since the sensor is what is asleep. The form rests on the same signal,
+//! so the screen is never inviting a finger nobody is listening for.
 
 use std::time::Duration;
 
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use guido::prelude::WriteSignal;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use zbus::proxy;
 use zbus::zvariant::OwnedObjectPath;
 
@@ -90,6 +97,7 @@ pub async fn run(
         }
     };
     let mut sleeps = sleep_signals(&connection).await;
+    let mut idle = config.idle.clone();
     // Across rounds and restarts alike: a suspend is not a way to more tries.
     let mut misses = 0;
     let mut failures = 0;
@@ -100,6 +108,7 @@ pub async fn run(
                 Wake::Ended(ended)
             }
             Some(asleep) = sleeps.next() => Wake::Sleep(asleep),
+            () = became_idle(&mut idle) => Wake::Idle,
         };
 
         match woke {
@@ -134,6 +143,14 @@ pub async fn run(
                 failures = 0;
                 continue;
             }
+            // The round was dropped and the claim with it, as for a suspend.
+            Wake::Idle => {
+                log::debug!("idle: fingerprint reader released");
+                state.set(FingerprintState::Resting);
+                rest(&mut idle, &mut sleeps).await;
+                failures = 0;
+                continue;
+            }
         }
 
         if failures >= MAX_FAILURES {
@@ -164,6 +181,8 @@ enum Wake {
     Ended(zbus::Result<Ended>),
     /// logind's `PrepareForSleep`: `true` going down, `false` coming back.
     Sleep(bool),
+    /// Nobody has touched anything for the idle timeout.
+    Idle,
 }
 
 /// How one claim of the reader ended.
@@ -213,6 +232,38 @@ async fn until_resumed(sleeps: &mut BoxStream<'static, bool>) {
         if !asleep {
             return;
         }
+    }
+}
+
+/// Ends once the user is idle. Never, when there is no telling: no
+/// protocol, no timeout, or the watcher gone.
+async fn became_idle(idle: &mut Option<watch::Receiver<bool>>) {
+    let Some(idle) = idle else {
+        return std::future::pending().await;
+    };
+    if idle.wait_for(|idle| *idle).await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+/// Waits, reader released, for the user to come back.
+///
+/// A suspend in the meantime changes nothing — the user is no less idle for
+/// it — but its signals are taken here, or they would be read once the user
+/// is back and restart a reader that had only just been claimed.
+async fn rest(idle: &mut Option<watch::Receiver<bool>>, sleeps: &mut BoxStream<'static, bool>) {
+    let Some(watch) = idle else { return };
+    let gone = loop {
+        tokio::select! {
+            // Dropped inside: the guard `wait_for` returns cannot cross an
+            // await.
+            gone = async { watch.wait_for(|idle| !*idle).await.is_err() } => break gone,
+            Some(_) = sleeps.next() => {}
+        }
+    };
+    // The watcher went away: there is no telling any more, so listen.
+    if gone {
+        *idle = None;
     }
 }
 

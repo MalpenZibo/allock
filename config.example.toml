@@ -30,6 +30,10 @@ pam_service = "allock"
 # Accept a fingerprint as well as the password. Lock screen only.
 fingerprint = true
 fingerprint_retries = 5
+# Seconds without input before the lock screen rests: the form gives way to
+# "press any key" and the fingerprint reader is switched off until one is
+# pressed (a sensor left scanning warms up). 0 keeps both up while locked.
+idle_timeout = 60
 
 [indicators]
 battery = true

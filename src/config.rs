@@ -210,6 +210,12 @@ pub struct AuthConfig {
     /// How many consecutive no-match scans before the reader is given up on
     /// for this attempt (fprintd stops on its own after a few anyway).
     pub fingerprint_retries: u32,
+    /// Seconds without input before the lock screen rests: the form gives way
+    /// to an invitation to press a key, and the fingerprint reader is switched
+    /// off until one is — a sensor left scanning while nobody is there warms
+    /// up. `0` keeps the form, and the reader, up for as long as the screen
+    /// is locked.
+    pub idle_timeout: u64,
 }
 
 impl Default for AuthConfig {
@@ -218,6 +224,7 @@ impl Default for AuthConfig {
             pam_service: "allock".to_owned(),
             fingerprint: true,
             fingerprint_retries: 5,
+            idle_timeout: 60,
         }
     }
 }

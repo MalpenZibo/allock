@@ -45,6 +45,8 @@ dependencies = [
  "tokio",
  "toml",
  "uzers",
+ "wayland-client",
+ "wayland-protocols",
  "zbus",
  "zeroize",
 ]

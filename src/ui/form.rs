@@ -17,6 +17,8 @@ const FINGERPRINT_GLYPH: &str = "\u{f0237}";
 const SUBMIT_GLYPH: &str = "\u{f0057}";
 /// nf-md-account
 const ACCOUNT_GLYPH: &str = "\u{f0004}";
+/// nf-md-lock_outline
+const LOCK_GLYPH: &str = "\u{f0341}";
 /// nf-md-apple_keyboard_caps — the ⇪ every other password field uses.
 const CAPS_LOCK_GLYPH: &str = "\u{f0632}";
 /// nf-fa-circle_o_notch — the open ring that stands in while a check runs.
@@ -143,11 +145,117 @@ pub fn view(screen: Screen) -> Container {
         )
         .child(avatar(&screen))
         .child(who(&screen))
-        .child(field(&screen))
-        .child(notice(&screen))
-        .child(fingerprint_hint(&screen));
+        .child(credentials(&screen));
 
     card(&screen, content)
+}
+
+/// How long the field takes to give way to the invitation, and to come back.
+const REST_MS: f32 = 350.0;
+
+/// Whether the field turns keys away: while the screen rests, and until the
+/// form is back. The key that wakes the screen is only that — it is not
+/// typed into a field nobody can see.
+///
+/// Through the fade as well as the rest, because the compositor says the
+/// user is back over a connection of its own, in no order against the key
+/// that brought them back: the key can arrive after the form has started to
+/// return. It cannot arrive after the fade is over.
+fn held(screen: &Screen) -> Memo<bool> {
+    let resting = screen.resting;
+    let fading = create_signal(false);
+    let writer = fading.writer();
+    let mut was_resting = false;
+    create_effect(move || {
+        let now = resting.get();
+        if was_resting && !now {
+            writer.set(true);
+            create_task(move |_ctx| async move {
+                tokio::time::sleep(std::time::Duration::from_millis(REST_MS as u64)).await;
+                writer.set(false);
+            });
+        }
+        was_resting = now;
+    });
+    create_memo(move || resting.get() || fading.get())
+}
+
+/// The field, what is said about it, and the fingerprint line — and, while
+/// the screen rests, the invitation to press a key that takes their place.
+///
+/// Who is signing in stays: the card is the same card, it only stops asking.
+/// That is the reader going to sleep made visible — the field and the line
+/// beneath it are the screen saying it is listening, and once the reader is
+/// not, they should not be saying so.
+///
+/// The field is never taken out of the tree, only faded: it keeps the focus,
+/// so the key that wakes the screen is not spent on waking — it lands in the
+/// field, which comes back with it already there.
+///
+/// Nothing loops while resting: the screen is likely dark, and a breathing
+/// animation would keep the GPU awake for nobody.
+fn credentials(screen: &Screen) -> Container {
+    let inputs = container()
+        .layout(
+            Flex::column()
+                // Tight: the notice keeps its line even when it has nothing
+                // to say, so the space between the field and the fingerprint
+                // line is this twice over plus that empty line.
+                .spacing(6.0)
+                .cross_alignment(CrossAlignment::Center),
+        )
+        .child(field(screen))
+        .child(notice(screen))
+        .child(fingerprint_hint(screen));
+    if !matches!(screen.mode, Mode::Lock | Mode::Preview) {
+        return inputs;
+    }
+
+    let theme = screen.theme;
+    let resting = screen.resting;
+    let ease = || Transition::new(REST_MS, TimingFunction::EaseInOut);
+
+    // A cross-fade in one box, not a fold: the card keeps its size, so
+    // nothing in it moves. A card that changed height would move everything
+    // in it by half the change, since it is centred on the screen — and a
+    // line of text landing between two rows of pixels is drawn soft.
+    let inputs = container()
+        .opacity((move || if resting.get() { 0.0 } else { 1.0 }).transition(ease()))
+        .child(inputs);
+    // Always in the tree and only faded, not built when it is needed: a
+    // child that comes and goes is a dynamic child, and a dynamic child in a
+    // `ZStack` does not follow the stack it fills — it takes all the room
+    // there is, and the card with it.
+    let invitation = container()
+        .width(fill())
+        .height(fill())
+        .layout(Flex::column().center())
+        .opacity((move || if resting.get() { 1.0 } else { 0.0 }).transition(ease()))
+        .child(invitation(theme));
+
+    container()
+        .layout(ZStack::new())
+        .child(inputs)
+        .child(invitation)
+}
+
+/// The lock and the words, on one baseline the way the fingerprint line has
+/// them: centred boxes would line up glyphs of different sizes by their line
+/// boxes, and leave them at unrelated heights.
+fn invitation(theme: ThemeColors) -> Container {
+    container()
+        .layout(
+            Flex::row()
+                .spacing(12.0)
+                .cross_alignment(CrossAlignment::Baseline),
+        )
+        .child(turning_glyph(LOCK_GLYPH, 24.0, theme.text_weak, false))
+        .child(
+            text("Press any key to unlock")
+                .font_size(17.0)
+                .color(theme.text)
+                .nowrap(),
+        )
 }
 
 /// The card the form sits on, lifted off the backdrop and shaken by a refusal.
@@ -253,6 +361,7 @@ pub(super) fn field(screen: &Screen) -> Container {
     let theme = screen.theme;
     let auth = screen.auth;
     let state = auth.state;
+    let held = held(screen);
     // The lock screen hides the pointer (see `super::lock_screen`), and the
     // field would bring it back as an I-beam: a caret-less masked field has
     // nothing a click could place. The greeter keeps it, for the user name.
@@ -316,6 +425,7 @@ pub(super) fn field(screen: &Screen) -> Container {
                                     .placeholder_color(with_alpha(theme.text, 0.4))
                                     .no_caret()
                                     .cursor(pointer)
+                                    .readonly(held)
                                     .autofocus()
                             };
                         }
@@ -436,7 +546,15 @@ fn fingerprint_hint(screen: &Screen) -> Container {
     // Whether there is a line at all, apart from what it says: the line is
     // built, and fades in, once per appearance, and a change of message only
     // redraws what is inside it.
-    let shown = create_memo(move || state.fingerprint.get() != FingerprintState::Unavailable);
+    // Resting has no line either: the form it sits in has given way to an
+    // invitation of its own, and coming back the line opens again once the
+    // reader is listening rather than speaking for a reader still waking.
+    let shown = create_memo(move || {
+        !matches!(
+            state.fingerprint.get(),
+            FingerprintState::Unavailable | FingerprintState::Resting
+        )
+    });
 
     container()
         .height(Length::default().transition(reveal()))
@@ -475,7 +593,7 @@ fn hint_line(theme: ThemeColors, fingerprint: FingerprintState) -> Vec<Container
             "Too many fingerprint attempts — use your password".to_owned(),
             theme.text_weak,
         ),
-        FingerprintState::Unavailable => return Vec::new(),
+        FingerprintState::Unavailable | FingerprintState::Resting => return Vec::new(),
     };
     vec![
         // The same swap the submit arrow makes, for the same reason: the

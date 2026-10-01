@@ -54,6 +54,7 @@ pub fn view(
         mode: Mode::Polkit,
         user: create_signal(crate::user::by_name(&request.user)),
         battery: None,
+        resting: create_signal(false).into(),
         sessions: Rc::new(Vec::new()),
         session: super::picker::Choice::new(0),
         users: Rc::new(Vec::new()),

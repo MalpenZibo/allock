@@ -123,6 +123,8 @@ pub enum FingerprintState {
     Retry(String),
     /// The reader gave up (too many bad scans, or it went away).
     Exhausted,
+    /// Released while nobody is at the machine; the next key wakes it.
+    Resting,
 }
 
 /// Signals the lock screen renders from.
@@ -307,6 +309,10 @@ impl Auth {
 pub struct FingerprintConfig {
     pub user: String,
     pub retries: u32,
+    /// Whether the user is idle, from [`crate::idle`]. The reader is released
+    /// while they are; `None` keeps it listening for as long as the screen is
+    /// up.
+    pub idle: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 /// Start the conversation and expose it reactively.
