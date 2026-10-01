@@ -1,18 +1,9 @@
 //! The polkit authentication agent: `allock --polkit`.
 //!
-//! A resident process with nothing on screen until polkitd asks for
-//! something. It registers on the system bus as the agent for the user's
-//! graphical session, and every `BeginAuthentication` opens a dialog: a
-//! modal card on an overlay layer that takes the keyboard, as Noctalia's and
-//! GNOME Shell's do. The dialog talks to polkit's helper itself (see
-//! [`crate::auth::polkit`]); the password never passes through this module.
-//!
-//! One request at a time. A second one while a dialog is open is refused, as
-//! hyprpolkitagent refuses it: polkitd tells the caller, and a dialog does not
-//! appear behind another one the user is typing into.
-//!
-//! The agent lives as long as the process: it is not re-registered if polkitd
-//! restarts, so the service that runs it should restart with polkit.
+//! Each `BeginAuthentication` opens a modal dialog that talks to polkit's
+//! helper itself ([`crate::auth::polkit`]), so the password never passes
+//! through here. A second request while a dialog is open is refused. The agent
+//! is not re-registered if polkitd restarts, so its service should restart too.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -27,12 +18,10 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use crate::config::Config;
 use crate::theme::ThemeColors;
 
-/// Where the agent object sits on the bus. Any path does; polkitd is told.
+/// Any path does; polkitd is told it at registration.
 const OBJECT_PATH: &str = "/org/allock/PolicyKit1/AuthenticationAgent";
 
-/// Set when the agent could not register, so the exit code says so: a
-/// service that exits cleanly after failing to be an agent would not be
-/// restarted.
+/// Set when registration fails, so the non-zero exit gets the service restarted.
 pub static REGISTRATION_FAILED: AtomicBool = AtomicBool::new(false);
 
 /// One authentication polkitd asked for, as the dialog shows it.
@@ -43,7 +32,6 @@ pub struct Request {
     pub action_id: String,
     /// What polkit says the program is trying to do, already localized.
     pub message: String,
-    /// The account to authenticate as.
     pub user: String,
     pub cookie: String,
 }
@@ -73,11 +61,8 @@ struct Pending {
     reply: oneshot::Sender<Outcome>,
 }
 
-/// The request being shown, shared by the bus side and the dialog.
-///
-/// Whoever ends a request takes it out of here, and the dialog is taken off
-/// the screen in the same step, under the lock: a request that ends as the
-/// next one begins cannot close the new one's dialog.
+/// The request being shown. Ending it and hiding its dialog happen under one
+/// lock, so a request ending as the next begins cannot close the new dialog.
 #[derive(Clone)]
 pub struct Requests {
     state: Arc<Mutex<State>>,
@@ -169,7 +154,6 @@ impl Agent {
             ));
         };
 
-        // A dropped sender is a dialog that went without a word.
         match outcome.await.unwrap_or(Outcome::Dismissed) {
             Outcome::Authenticated => {
                 log::info!("{action_id}: authenticated");
@@ -188,9 +172,8 @@ impl Agent {
     }
 }
 
-/// The account the dialog asks for: ours when polkit offers it, else the
-/// first user it offers. Groups are skipped — polkit lists their members as
-/// users too when it wants one of them.
+/// Our own account when polkit offers it, else the first user it offers.
+/// Groups are skipped: polkit also lists their members as users.
 fn choose_identity(identities: &[(String, HashMap<String, OwnedValue>)]) -> Option<String> {
     let uids: Vec<u32> = identities
         .iter()
@@ -206,12 +189,9 @@ fn choose_identity(identities: &[(String, HashMap<String, OwnedValue>)]) -> Opti
     Some(user.name().to_string_lossy().into_owned())
 }
 
-/// Register as the agent for this user's graphical session.
-///
-/// The session is the one polkitd will find for this process, looked up the
-/// way it looks: the process's own session, else the user's display session.
-/// A service under `user@.service` belongs to no session, and polkitd refuses
-/// a registration whose session is not the caller's.
+/// Register as the agent for this user's graphical session, found the way
+/// polkitd finds it: the process's own session, else the user's display one.
+/// A service under `user@.service` has no session of its own.
 async fn register(requests: Requests) -> zbus::Result<zbus::Connection> {
     let connection = zbus::Connection::system().await?;
     connection
@@ -289,9 +269,7 @@ pub fn run(config: Rc<Config>, theme: ThemeColors) {
         let requests = requests.clone();
         move |_rx, _ctx| async move {
             match register(requests).await {
-                // Held for as long as the task runs, which is as long as the
-                // process: dropping it is leaving the bus, and polkitd
-                // forgets an agent that leaves.
+                // Dropping the connection leaves the bus, and polkitd forgets the agent.
                 Ok(_connection) => std::future::pending::<()>().await,
                 Err(e) => {
                     log::error!("cannot register as a polkit agent: {e}");
@@ -336,9 +314,7 @@ fn spawn_dialog(
 ) -> SurfaceHandle {
     spawn_surface(
         SurfaceConfig::new()
-            // The whole output, dimmed behind the card: the dialog is modal
-            // and says so. No output is named, so the compositor puts it
-            // where the user is.
+            // No output named: the compositor puts the dialog where the user is.
             .width(0)
             .height(0)
             .anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT)
@@ -349,9 +325,7 @@ fn spawn_dialog(
             .background_color(Color::TRANSPARENT),
         move || {
             let id = request.id;
-            // However the dialog goes — answered, cancelled, or closed under
-            // it by the compositor — the request ends with it. Ending one
-            // that already ended does nothing.
+            // The request ends with the dialog, even one the compositor closes.
             on_cleanup({
                 let requests = requests.clone();
                 move || requests.resolve(id, Outcome::Dismissed)

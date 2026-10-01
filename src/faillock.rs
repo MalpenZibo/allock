@@ -1,37 +1,24 @@
-//! Whether `pam_faillock` has locked the account, read ahead of PAM.
-//!
-//! PAM only says so when the stack reaches `pam_faillock preauth`, and a
-//! `pam_fprintd` ahead of it — polkit's stack has one — waits for a finger
-//! first: the screen would take a password and only then say that no password
-//! could have worked. So the screen reads the tally itself, which the account
-//! owns (`faillock --user $USER` reads it the same way), and says so up front.
-//!
-//! It is a forecast, never a gate. The rule is pam_faillock's, applied to
-//! `/etc/security/faillock.conf`; options written on the PAM line instead are
-//! out of sight, so the field stays open and PAM has the last word. A finger
-//! still works through a lock: `pam_fprintd` runs before `pam_faillock`.
+//! Whether `pam_faillock` has locked the account, read from the tally ahead of
+//! PAM, since a `pam_fprintd` before `preauth` delays PAM's own answer. It is a
+//! forecast, never a gate: options on the PAM line are invisible here.
 
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CONFIG: &str = "/etc/security/faillock.conf";
 
-/// `struct tally` in pam_faillock's `faillock.h`: the source, two reserved
-/// bytes, the status and the time of the failure.
+/// `struct tally` in pam_faillock's `faillock.h`: source, reserved, status, time.
 const RECORD: usize = 64;
 const TALLY_STATUS_VALID: u16 = 0x1;
 
-/// A lock in force.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lock {
-    /// Lifted at this time.
     Until(SystemTime),
     /// `unlock_time = never`: until an administrator resets the tally.
     UntilReset,
 }
 
 impl Lock {
-    /// What the screen says about it, at `now`.
     pub fn describe(self, now: SystemTime) -> String {
         match self {
             Lock::Until(until) => {
@@ -45,8 +32,7 @@ impl Lock {
         }
     }
 
-    /// When what [`describe`](Self::describe) says next changes: the next
-    /// whole minute left, or the end. `None` when it never does.
+    /// When the text from [`describe`](Self::describe) next changes.
     pub fn next_change(self, now: SystemTime) -> Option<Duration> {
         let Lock::Until(until) = self else {
             return None;
@@ -54,7 +40,6 @@ impl Lock {
         let left = until.duration_since(now).unwrap_or_default();
         let into_minute = left.as_secs() % 60;
         let wait = if into_minute == 0 {
-            // On a boundary, or under a second from the end.
             left.min(Duration::from_secs(60))
         } else {
             Duration::from_secs(into_minute)
@@ -106,7 +91,6 @@ fn parse_options(config: &str) -> Options {
     options
 }
 
-/// The times of the valid failures in a tally file, in seconds.
 fn failures(tally: &[u8]) -> Vec<u64> {
     tally
         .chunks_exact(RECORD)
@@ -118,9 +102,7 @@ fn failures(tally: &[u8]) -> Vec<u64> {
         .collect()
 }
 
-/// pam_faillock's `check_tally`: the failures within `fail_interval` of the
-/// latest one, against `deny`, and the lock lasting `unlock_time` from the
-/// latest.
+/// Mirrors pam_faillock's `check_tally`.
 fn lock(options: &Options, failures: &[u64], now: u64) -> Option<Lock> {
     let latest = *failures.iter().max()?;
     let recent = failures
@@ -137,8 +119,6 @@ fn lock(options: &Options, failures: &[u64], now: u64) -> Option<Lock> {
     (until >= now).then(|| Lock::Until(UNIX_EPOCH + Duration::from_secs(until)))
 }
 
-/// The lock on `user`'s account, as far as can be told. `None` when there is
-/// none, or the tally cannot be read.
 pub fn status(user: &str) -> Option<Lock> {
     let options = std::fs::read_to_string(CONFIG)
         .map(|config| parse_options(&config))
@@ -183,7 +163,6 @@ mod tests {
 
     #[test]
     fn failures_too_far_apart_do_not_add_up() {
-        // The first is more than fail_interval before the latest.
         assert_eq!(lock(&Options::default(), &[0, 1000, 1200], 1300), None);
     }
 
@@ -228,7 +207,6 @@ mod tests {
             lock.describe(now),
             "Too many attempts — locked for 5 more minutes"
         );
-        // 250 s left: the text changes when 240 are left, in 10 s.
         assert_eq!(lock.next_change(now), Some(Duration::from_millis(10_050)));
         let lock = Lock::Until(now + Duration::from_secs(30));
         assert_eq!(

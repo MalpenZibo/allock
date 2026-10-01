@@ -7,20 +7,16 @@ use uzers::os::unix::UserExt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UserInfo {
-    /// The account name PAM authenticates.
     pub name: String,
-    /// The name shown on screen: the GECOS full name when set, otherwise the
-    /// account name.
+    /// The GECOS full name when set, otherwise the account name.
     pub display_name: String,
-    /// The avatar, if one can be read.
     pub avatar: Option<PathBuf>,
 }
 
 impl UserInfo {
     fn from_user(user: &User) -> Self {
         let name = user.name().to_string_lossy().into_owned();
-        // GECOS is comma-separated (full name, office, phones); only the first
-        // field is a name.
+        // GECOS is comma-separated; only the first field is the full name.
         let display_name = user
             .gecos()
             .to_string_lossy()
@@ -39,11 +35,8 @@ impl UserInfo {
     }
 }
 
-/// `~/.face` where it can be read, then the picture AccountsService keeps.
-///
-/// The lock screen runs as the user and reads their home. The greeter runs as
-/// `greeter`, which usually cannot — a home is commonly `0700` — so it finds
-/// the picture where GDM, SDDM and LightDM look for it too.
+/// `~/.face`, then AccountsService's icon, which the greeter user can read
+/// when a `0700` home hides `~/.face`.
 fn avatar(name: &str, home: &Path) -> Option<PathBuf> {
     [home.join(".face"), home.join(".face.icon")]
         .into_iter()
@@ -54,8 +47,7 @@ fn avatar(name: &str, home: &Path) -> Option<PathBuf> {
 pub fn current() -> UserInfo {
     let uid = uzers::get_current_uid();
     let Some(user) = uzers::get_user_by_uid(uid) else {
-        // No passwd entry for our own uid is pathological, but the lock
-        // screen still has to come up: PAM will simply reject an empty name.
+        // The lock screen must still come up; PAM rejects an empty name.
         log::error!("no passwd entry for uid {uid}");
         return UserInfo {
             name: String::new(),
@@ -66,17 +58,12 @@ pub fn current() -> UserInfo {
     UserInfo::from_user(&user)
 }
 
-/// Look a user up by name.
 pub fn by_name(name: &str) -> Option<UserInfo> {
     uzers::get_user_by_name(name).map(|user| UserInfo::from_user(&user))
 }
 
-/// The accounts a person logs in to, for the greeter's user picker.
-///
-/// Read from `/etc/passwd`, so an account that exists only in a network
-/// directory is not listed — the picker's "Other…" entry is for that. An
-/// account is a person's when its uid is in `UID_MIN..=UID_MAX` from
-/// `/etc/login.defs` (1000 and 60000 when unset) and its shell lets it log in.
+/// Accounts in `/etc/passwd` with a uid in `login.defs`' `UID_MIN..=UID_MAX`
+/// and a login shell. Network-only accounts go through the picker's "Other…".
 pub fn login_users() -> Vec<UserInfo> {
     let defs = std::fs::read_to_string("/etc/login.defs").unwrap_or_default();
     let range = uid_range(&defs);
@@ -105,7 +92,6 @@ fn uid_range(login_defs: &str) -> std::ops::RangeInclusive<u32> {
     value("UID_MIN").unwrap_or(1000)..=value("UID_MAX").unwrap_or(60000)
 }
 
-/// The account names in a passwd file that belong to people, by uid.
 fn login_names(passwd: &str, uids: std::ops::RangeInclusive<u32>) -> Vec<String> {
     let mut accounts: Vec<(u32, String)> = passwd
         .lines()

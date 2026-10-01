@@ -1,32 +1,15 @@
-//! polkit's side of the conversation, used by the polkit agent.
+//! polkit agent conversation. PAM runs in `polkit-agent-helper-1`, which
+//! reports to polkitd itself; since polkit 126 each connection to
+//! [`HELPER_SOCKET`] is a fresh socket-activated helper.
 //!
-//! An agent does not run PAM itself: polkitd only takes "this user proved who
-//! they are" from root, so the stack runs in `polkit-agent-helper-1`, which
-//! reports the verdict to polkitd on its own. Since polkit 126 the helper is
-//! not setuid but socket-activated: every connection to
-//! [`HELPER_SOCKET`] is a fresh helper, which learns who is asking from the
-//! socket's peer credentials.
+//! Protocol: we write the user and cookie as lines; the helper answers with
+//! `g_strescape`d `PAM_*` lines and ends on `SUCCESS` or `FAILURE`. An answer
+//! is one unescaped line. A retry is a new connection with the same cookie.
 //!
-//! The protocol is lines of text. The agent writes the user to authenticate
-//! and the cookie polkitd handed it; the helper answers with
-//! `PAM_PROMPT_ECHO_OFF`, `PAM_PROMPT_ECHO_ON`, `PAM_ERROR_MSG` and
-//! `PAM_TEXT_INFO` lines, escaped with `g_strescape`, and ends on `SUCCESS` or
-//! `FAILURE`. An answer is one line back, unescaped. A retry is a new
-//! connection with the same cookie.
-//!
-//! The first connection is made as the dialog opens, so a finger works
-//! without typing anything. After a refusal the next one waits for the next
-//! answer: every connection ends in `pam_unix` unless a finger ends it first,
-//! and `pam_faillock` counts each one that ends there without a password —
-//! a dialog cancelled after a wrong password used to cost two attempts, and
-//! with the account locked, a fresh prompt after every refusal read as a
-//! screen still willing to take one.
-//!
-//! The helper runs the `polkit-1` PAM stack in order, so a `pam_fprintd` in it
-//! waits for a finger before the password is ever asked for. An answer is
-//! written as soon as it is given, not when it is asked for, and waits in the
-//! socket: typing the password while the reader waits is how it is used
-//! without the finger, as hyprpolkitagent does.
+//! After a refusal no connection is made until the next answer, since
+//! `pam_faillock` counts each one that reaches `pam_unix` without a password.
+//! Answers are written as soon as given, so a password typed while
+//! `pam_fprintd` waits is already in the socket when asked for.
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -40,20 +23,15 @@ use super::{AuthCommand, AuthEvent};
 
 pub const HELPER_SOCKET: &str = "/run/polkit/agent-helper.socket";
 
-/// What the helper refuses without a reason: its `FAILURE` carries none, and
-/// the stack may have failed on something other than the password.
+/// `FAILURE` carries no reason, and it may not be the password.
 const FAILED: &str = "Authentication failed";
 
-/// How one connection to the helper ended.
 enum Attempt {
     Succeeded,
-    /// Refused. `String` is the last error the stack gave, if it gave one.
+    /// The last error the stack gave, if any.
     Failed(Option<String>),
-    /// The UI asked for a fresh attempt.
     Restarted,
-    /// The UI is gone.
     Closed,
-    /// The helper cannot be reached or stopped making sense.
     Broken(String),
 }
 
@@ -63,7 +41,6 @@ pub async fn run(
     mut cmd_rx: mpsc::Receiver<AuthCommand>,
     event_tx: mpsc::Sender<AuthEvent>,
 ) {
-    // The answer the next attempt starts with, once there has been a refusal.
     let mut answer = None;
     loop {
         let event = match attempt(&user, &cookie, answer.take(), &mut cmd_rx, &event_tx).await {
@@ -86,8 +63,7 @@ pub async fn run(
         if !again {
             break;
         }
-        // The refusal stays on screen, and no helper is asked anything,
-        // until there is something to ask it with.
+        // No new helper until there is an answer to give it.
         loop {
             match cmd_rx.recv().await {
                 None => return,
@@ -102,8 +78,7 @@ pub async fn run(
         }
     }
 
-    // Nothing more to ask, but the conversation is not over until the UI
-    // says so: returning would read as a backend that stopped.
+    // Returning would read as a backend that stopped.
     while cmd_rx.recv().await.is_some() {}
 }
 
@@ -128,16 +103,13 @@ async fn attempt(
         return Attempt::Broken(format!("cannot write to the helper: {e}"));
     }
 
-    // Answers and questions pair up in order, whichever comes first. An
-    // answer given ahead of its question is already in the socket, so the
-    // question is not shown: the field stays busy with the answer in flight.
+    // Answers and questions pair up in order; a question already answered
+    // ahead is not shown.
     let mut questions_open = 0u32;
     let mut answers_ahead = 0u32;
     let mut answered = false;
-    // Only what the stack says after the last answer is about that answer:
-    // before it, the fingerprint reader's complaints. Errors in a row are one
-    // message over several lines — pam_faillock says the account is locked,
-    // then how long for — so they are kept together.
+    // Only errors after the last answer concern it. Consecutive errors are
+    // one multi-line message (pam_faillock's lock and its duration).
     let mut last_error: Option<String> = None;
     let mut errors_in_a_row = false;
     let mut heard_anything = false;
@@ -158,8 +130,7 @@ async fn attempt(
             line = read_line(&mut read) => {
                 let line = match line {
                     Ok(Some(line)) => line,
-                    // A helper that hangs up without a verdict has failed,
-                    // unless it never said anything: then it is not working.
+                    // Hanging up silently means the helper is broken.
                     Ok(None) if heard_anything => return Attempt::Failed(last_error),
                     Ok(None) => return Attempt::Broken("the helper hung up".to_owned()),
                     Err(e) => return Attempt::Broken(format!("cannot read from the helper: {e}")),
@@ -229,11 +200,8 @@ async fn attempt(
     }
 }
 
-/// Why `answer` cannot go to the helper, if it cannot.
-///
-/// The helper reads an answer with `fgets` and keeps it as a C string: a line
-/// break would end it early and answer the next question with the rest, a NUL
-/// would cut it short.
+/// The helper reads answers with `fgets` into a C string, so a line break or
+/// NUL would split or truncate one.
 fn unsendable(answer: &Secret) -> Option<&'static str> {
     answer
         .expose()
@@ -241,8 +209,7 @@ fn unsendable(answer: &Secret) -> Option<&'static str> {
         .then_some("That cannot be typed here")
 }
 
-/// Write one answer and its line break in a single buffer that is wiped as it
-/// drops. The socket's own buffer is the kernel's, and out of reach.
+/// One buffer, wiped on drop.
 async fn send_answer(write: &mut OwnedWriteHalf, answer: &str) -> std::io::Result<()> {
     let mut line = Zeroizing::new(Vec::with_capacity(answer.len() + 1));
     line.extend_from_slice(answer.as_bytes());
@@ -250,7 +217,7 @@ async fn send_answer(write: &mut OwnedWriteHalf, answer: &str) -> std::io::Resul
     write.write_all(&line).await
 }
 
-/// One line from the helper, without its line break. `None` at the end.
+/// Without its line break; `None` at EOF.
 async fn read_line(read: &mut BufReader<OwnedReadHalf>) -> std::io::Result<Option<Vec<u8>>> {
     let mut line = Vec::new();
     if read.read_until(b'\n', &mut line).await? == 0 {
@@ -272,8 +239,7 @@ enum Line {
     Unknown,
 }
 
-/// Read one line the way polkit's own agent library does: unescape the whole
-/// line, then look at how it starts.
+/// Like polkit's agent library: unescape the whole line, then match the prefix.
 fn parse(line: &[u8]) -> Line {
     let line = unescape(line);
     let line = String::from_utf8_lossy(&line);
@@ -302,11 +268,7 @@ fn parse(line: &[u8]) -> Line {
     }
 }
 
-/// `g_strcompress`: undo `g_strescape`.
-///
-/// The helper escapes every byte outside printable ASCII as three octal
-/// digits, so a message in any language but English arrives as `\303\250`
-/// and has to be put back together before it is UTF-8 again.
+/// `g_strcompress`: non-ASCII bytes arrive as octal escapes.
 fn unescape(line: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(line.len());
     let mut bytes = line.iter().copied().peekable();
@@ -360,7 +322,6 @@ mod tests {
 
     #[test]
     fn octal_escapes_become_utf8_again() {
-        // "Appoggia il dito sul lettore" is ASCII; an accent is not.
         let line = br"PAM_TEXT_INFO Perch\303\251 no";
         assert_eq!(parse(line), Line::Info("Perché no".to_owned()));
     }
@@ -408,8 +369,6 @@ mod tests {
 
     #[test]
     fn an_escaped_prefix_is_still_the_prefix() {
-        // polkit unescapes the whole line before looking at it, so this is
-        // what it does too.
         assert_eq!(
             parse(br"PAM_TEXT_INFO line one\nline two"),
             Line::Info("line one\nline two".to_owned())

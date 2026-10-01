@@ -36,7 +36,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        // Always drain the inner stream, keeping only the latest value
+        // Drain the inner stream, keeping only the latest value.
         loop {
             match this.inner.as_mut().poll_next(cx) {
                 Poll::Ready(Some(item)) => *this.pending = Some(item),
@@ -47,7 +47,6 @@ where
             }
         }
 
-        // If we're in the throttling period, poll the sleep
         if let Some(sleep) = &mut this.sleep {
             match sleep.as_mut().poll(cx) {
                 Poll::Pending => return Poll::Pending,
@@ -55,7 +54,6 @@ where
             }
         }
 
-        // Emit pending value if we have one
         if let Some(item) = this.pending.take() {
             *this.sleep = Some(Box::pin(time::sleep(*this.duration)));
             return Poll::Ready(Some(item));

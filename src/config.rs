@@ -10,17 +10,11 @@ use guido::prelude::Color;
 use hex_color::HexColor;
 use serde::Deserialize;
 
-// ---------------------------------------------------------------------------
-// Top-level Config
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Config {
     pub log_level: String,
-    /// Which outputs draw the interface — clock, login card, status row.
-    /// Every output is always covered by a lock surface showing the
-    /// background; this only decides which of them carry the controls.
+    /// Which outputs show the clock and login card; every output is still locked.
     pub main_output: Outputs,
     pub background: BackgroundConfig,
     pub clock: ClockConfig,
@@ -45,10 +39,6 @@ impl Default for Config {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Outputs
-// ---------------------------------------------------------------------------
-
 /// Which outputs something is drawn on.
 #[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub enum Outputs {
@@ -71,15 +61,9 @@ impl Outputs {
         }
     }
 
-    /// Whether the output at `index` is one of the selected ones, given every
-    /// connected output described as `(name, make, model)` in the order the
-    /// compositor advertised them.
-    ///
-    /// `All` selects all of them. `Targets` selects each one it names, and
-    /// every one it names may be missing: a monitor unplugged while the screen
-    /// is locked, or one that was never there. The controls then fall back to
-    /// the first output, because a lock screen whose password field is on no
-    /// screen at all is a lock screen you cannot get out of.
+    /// Whether the output at `index` of `all` is selected. When no target is
+    /// connected the first output stands in, so the password field is always
+    /// on some screen.
     pub fn selects(&self, index: usize, all: &[(&str, &str, &str)]) -> bool {
         let Some(&(name, make, model)) = all.get(index) else {
             return false;
@@ -87,19 +71,13 @@ impl Outputs {
         if self.matches(name, make, model) {
             return true;
         }
-        // Not named — and nothing else is either, so this one stands in if it
-        // is the first. Every surface runs this over the same list, so exactly
-        // one of them says yes.
+        // Every surface runs this over the same list, so exactly one stands in.
         index == 0
             && !all
                 .iter()
                 .any(|&(name, make, model)| self.matches(name, make, model))
     }
 }
-
-// ---------------------------------------------------------------------------
-// Background
-// ---------------------------------------------------------------------------
 
 #[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BackgroundFit {
@@ -115,24 +93,14 @@ pub enum BackgroundFit {
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct BackgroundConfig {
-    /// Image to draw behind the form. `~` is expanded. When unset (or
-    /// unreadable) the appearance background colour is used instead.
+    /// Image behind the form, `~` expanded; unset or unreadable uses the background colour.
     pub path: Option<String>,
     pub fit: BackgroundFit,
-    /// Black scrim over the image, `0.0`–`1.0`. Keeps the form readable on a
-    /// bright wallpaper.
+    /// Black scrim over the image, `0.0`–`1.0`.
     pub dim: f32,
-    /// Blur radius in logical pixels for the wallpaper showing through the
-    /// cards. `0` turns the frosted effect off and leaves the cards plainly
-    /// translucent.
-    ///
-    /// Handed to guido's `backdrop_blur`. Not the compositor's blur: a lock
-    /// surface has nothing composited underneath it, so what softens the
-    /// wallpaper is guido's in-surface pass.
+    /// Blur radius in logical pixels for the wallpaper behind the cards; `0` disables it.
     pub blur: f32,
-    /// How much of the card tint covers the blurred wallpaper, `0.0`-`1.0`.
-    /// Only applies when there is a wallpaper — with none there is nothing
-    /// behind the card to reveal, so it stays opaque.
+    /// Card tint over the blurred wallpaper, `0.0`–`1.0`; without a wallpaper cards are opaque.
     pub card_opacity: f32,
 }
 
@@ -151,12 +119,8 @@ impl Default for BackgroundConfig {
 impl BackgroundConfig {
     pub fn resolved_path(&self) -> Option<PathBuf> {
         let path = expand_tilde(self.path.as_deref()?);
-        // Canonicalised, not merely existence-checked. Wallpaper daemons point
-        // an extensionless symlink (`~/.config/niri-wallpaper/current`) at the
-        // real file, and both guido's decoder and `image::open` choose their
-        // format from the *extension* — following the link is what makes the
-        // wallpaper decodable at all. It also drops dangling links, which are
-        // not images however much they look like a path.
+        // Canonicalised because wallpaper daemons use extensionless symlinks and
+        // the decoders pick the format from the extension; drops dangling links too.
         let resolved = std::fs::canonicalize(&path)
             .inspect_err(|e| log::warn!("background.path {path:?} is unusable: {e}"))
             .ok()?;
@@ -167,10 +131,6 @@ impl BackgroundConfig {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Clock
-// ---------------------------------------------------------------------------
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -190,31 +150,16 @@ impl Default for ClockConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Auth
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct AuthConfig {
-    /// PAM service name — needs a matching `/etc/pam.d/<name>`. Lock mode
-    /// only; the greeter authenticates through greetd instead.
+    /// PAM service name, with a matching `/etc/pam.d/<name>`. Lock mode only.
     pub pam_service: String,
-    /// Verify against fprintd in parallel with the password.
-    ///
-    /// This is an *additional* way in, never a replacement: the password
-    /// field keeps working and a fingerprint match is accepted on fprintd's
-    /// word, the same trust model hyprlock and the GNOME/KDE lock screens
-    /// use. Set to `false` to require the password.
+    /// Accept an fprintd match alongside the password; `false` requires the password.
     pub fingerprint: bool,
-    /// How many consecutive no-match scans before the reader is given up on
-    /// for this attempt (fprintd stops on its own after a few anyway).
+    /// Consecutive no-match scans before the reader is given up on.
     pub fingerprint_retries: u32,
-    /// Seconds without input before the lock screen rests: the form gives way
-    /// to an invitation to press a key, and the fingerprint reader is switched
-    /// off until one is — a sensor left scanning while nobody is there warms
-    /// up. `0` keeps the form, and the reader, up for as long as the screen
-    /// is locked.
+    /// Seconds without input before the form and fingerprint reader rest; `0` disables.
     pub idle_timeout: u64,
 }
 
@@ -229,10 +174,6 @@ impl Default for AuthConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Indicators
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize, Clone, Copy, Debug)]
 #[serde(default)]
 pub struct IndicatorsConfig {
@@ -245,10 +186,6 @@ impl Default for IndicatorsConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Greeter
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize, Clone, Debug)]
 pub struct SessionDef {
     /// Shown in the picker.
@@ -260,15 +197,9 @@ pub struct SessionDef {
 }
 
 impl SessionDef {
-    /// The argv to start, with its output sent to the journal through
-    /// `systemd_cat` when there is one.
-    ///
-    /// greetd starts a session on the greeter's VT with the console as its
-    /// output, so whatever its start script prints — `niri-session`'s
-    /// deprecation warning from `systemctl import-environment`, say — is read
-    /// on screen between the greeter and the desktop. `systemd-cat` replaces
-    /// itself with the command, so what greetd waits on is still the session.
-    /// It is tagged with the command's name: `journalctl -t niri-session`.
+    /// The argv to start, through `systemd_cat` when given so the session's
+    /// console output goes to the journal tagged with the command's name.
+    /// `systemd-cat` execs the command, so greetd still waits on the session.
     pub fn argv(&self, systemd_cat: Option<&std::path::Path>) -> Vec<String> {
         let (Some(systemd_cat), Some(program)) = (systemd_cat, self.command.first()) else {
             return self.command.clone();
@@ -301,25 +232,18 @@ pub enum SessionOutput {
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct GreeterConfig {
-    /// Preselected account in the user picker, over the remembered one. An
-    /// account the picker does not list is ignored.
+    /// Account preselected in the user picker, over the remembered one.
     pub user: Option<String>,
-    /// Preselected session, by name, over the remembered one. Case does not
-    /// matter; a name no session has is ignored.
+    /// Session preselected by name, case-insensitive, over the remembered one.
     pub default_session: Option<String>,
-    /// Where the session's console output goes. See [`SessionDef::argv`].
+    /// Where the session's console output goes.
     pub session_output: SessionOutput,
-    /// Offer "Other…" after the listed accounts, for one the list does not
-    /// have — a network directory, systemd-homed. Off, only listed accounts
-    /// can sign in here, unless nobody is listed: then the form asks anyway.
+    /// Offer "Other…" to type an account the picker does not list.
     pub other_user: bool,
-    /// Sessions offered in the picker. Empty means scan the standard
-    /// `wayland-sessions` / `xsessions` directories.
+    /// Sessions offered in the picker; empty scans `wayland-sessions` and `xsessions`.
     #[serde(rename = "session")]
     pub sessions: Vec<SessionDef>,
-    /// Preselect the last user and session that signed in successfully. Off
-    /// leaves nothing on disk to read *or* to write — on a shared machine the
-    /// last user name is a hint about who uses it.
+    /// Preselect the last user and session that signed in; off stores nothing on disk.
     pub remember: bool,
 }
 
@@ -336,24 +260,17 @@ impl Default for GreeterConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Appearance
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize, Clone, Copy, Debug)]
 #[serde(untagged)]
 pub enum AppearanceColor {
     Simple(HexColor),
     Complete {
         base: HexColor,
-        /// Unused by allock's palette, but kept for the same reason as
-        /// `text`: the variant is matched untagged.
+        /// Unused, but kept so the untagged variant still matches.
         #[allow(dead_code)]
         strong: Option<HexColor>,
         weak: Option<HexColor>,
-        /// Unused by allock's layout, but the variant is matched untagged:
-        /// dropping the field would make a colour that sets it fail to
-        /// deserialize and silently fall back to the defaults.
+        /// Unused, but kept so the untagged variant still matches.
         #[allow(dead_code)]
         text: Option<HexColor>,
     },
@@ -421,10 +338,6 @@ impl Default for Appearance {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Loading
-// ---------------------------------------------------------------------------
-
 pub fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/")
         && let Ok(home) = std::env::var("HOME")
@@ -453,12 +366,7 @@ fn read_toml(path: &Path) -> Option<toml::Table> {
     }
 }
 
-/// Read just `log_level`, before the logger exists.
-///
-/// The logger has to be up before [`load`] runs, or every diagnostic about
-/// loading the config — which file was found, which `[appearance]` was
-/// imported, what failed to parse — is emitted into a logger that is not
-/// listening yet. Reading the file twice is cheaper than losing those.
+/// Read just `log_level`, so the logger is up before [`load`] logs anything.
 pub fn log_level(path: &Path) -> String {
     std::fs::read_to_string(path)
         .ok()
@@ -546,8 +454,7 @@ fn parse_desktop_entry(content: &str, kind: &str) -> Option<SessionDef> {
             continue;
         };
         match key.trim() {
-            // Localised variants (`Name[it]`) are deliberately skipped: the
-            // greeter has no locale of its own to pick between them.
+            // `Name[it]` and the like are skipped: the greeter has no locale.
             "Name" => name = Some(value.trim().to_owned()),
             "Exec" => exec = Some(value.trim().to_owned()),
             "Hidden" | "NoDisplay" => hidden |= value.trim() == "true",
@@ -642,8 +549,6 @@ mod tests {
 
     #[test]
     fn main_output_reads_both_shapes() {
-        // The key and its two spellings are the user-facing contract; a typo
-        // here would fall back to the defaults with only a log line to say so.
         let all: Config = toml::from_str(r#"main_output = "All""#).unwrap();
         assert_eq!(all.main_output, Outputs::All);
 

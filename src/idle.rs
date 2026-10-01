@@ -1,11 +1,6 @@
-//! Whether the user is at the machine, from the compositor's
-//! `ext-idle-notify-v1`.
-//!
-//! guido does not speak the protocol, so this keeps a Wayland connection of
-//! its own on a thread of its own. It asks for the *input* idle notification
-//! where the compositor has it (version 2): that one ignores idle inhibitors,
-//! and a browser holding one is exactly what keeps a locked machine awake —
-//! it has no say over whether anyone is in front of it.
+//! Whether the user is at the machine, from `ext-idle-notify-v1` on a Wayland
+//! connection of its own, since guido does not speak the protocol. Version 2's
+//! input idle notification is preferred: it ignores idle inhibitors.
 
 use std::time::Duration;
 
@@ -19,9 +14,8 @@ use wayland_protocols::ext::idle_notify::v1::client::{
     ext_idle_notifier_v1::ExtIdleNotifierV1,
 };
 
-/// `true` once nothing has been touched for `timeout`, `false` again at the
-/// first input. `None` when the compositor cannot say, in which case nobody
-/// is ever idle.
+/// `true` after `timeout` without input, `false` at the next input. `None`
+/// when the compositor cannot say.
 pub fn watch(timeout: Duration) -> Option<watch::Receiver<bool>> {
     match start(timeout) {
         Ok(idle) => Some(idle),
@@ -32,8 +26,7 @@ pub fn watch(timeout: Duration) -> Option<watch::Receiver<bool>> {
     }
 }
 
-/// The same answer as a signal the screen can draw from. Always `false`
-/// without a watcher.
+/// The same answer as a signal; always `false` without a watcher.
 pub fn resting(idle: Option<watch::Receiver<bool>>) -> Signal<bool> {
     let resting = create_signal(false);
     let writer = resting.writer();

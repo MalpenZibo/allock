@@ -1,14 +1,5 @@
-//! What the greeter remembers between boots: who signed in, and into what.
-//!
-//! Deliberately not part of the config. The config is what the machine's owner
-//! wrote down; this is a note the greeter leaves for itself, disposable and
-//! rewritten on every successful login — which is why it lives under the cache
-//! directory and why nothing here is an error worth stopping for.
-//!
-//! It is only ever *a suggestion*: the session is preselected in a picker that
-//! still cycles, and the user name is typed into the field for you rather than
-//! handed to greetd, so the greeter can never remember its way into refusing to
-//! let somebody else log in.
+//! The greeter's memory of the last login, kept in the cache directory. It is
+//! only ever a suggestion, and failing to read or write it is never fatal.
 
 use std::path::{Path, PathBuf};
 
@@ -18,17 +9,12 @@ use crate::config::SessionDef;
 
 #[derive(Default, Deserialize, Serialize, Debug, PartialEq)]
 pub struct LastLogin {
-    /// The name answered to greetd's username prompt.
     pub user: Option<String>,
-    /// `SessionDef::name`, not an index: the list is scanned from disk, so a
-    /// package installing a session would silently shift every index under it.
+    /// A name, not an index: installing a session would shift indices.
     pub session: Option<String>,
 }
 
 impl LastLogin {
-    /// Where the picker should start. Anything unrecognised means the first
-    /// session — a remembered name that no longer exists is not an error, it is
-    /// a session that was uninstalled.
     pub fn session_index(&self, sessions: &[SessionDef]) -> usize {
         self.session
             .as_deref()
@@ -37,8 +23,7 @@ impl LastLogin {
     }
 }
 
-/// The session the picker starts on: the configured default when a session
-/// has that name (in any case), else the remembered one, else the first.
+/// The configured default (case-insensitive), else the remembered session, else the first.
 pub fn preselect(sessions: &[SessionDef], default: Option<&str>, last: &LastLogin) -> usize {
     default
         .and_then(|name| {
@@ -73,7 +58,6 @@ fn read(path: &Path) -> LastLogin {
             log::warn!("ignoring unreadable {}: {e}", path.display());
             LastLogin::default()
         }),
-        // Missing is the normal state on a fresh machine, not a problem.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => LastLogin::default(),
         Err(e) => {
             log::warn!("cannot read {}: {e}", path.display());
@@ -96,8 +80,7 @@ fn write(path: &Path, last: &LastLogin) {
         log::warn!("cannot create {}: {e}", dir.display());
         return;
     }
-    // The greeter runs as its own user, whose home may well be read-only. Worth
-    // saying once, never worth refusing to start a session over.
+    // The greeter user's home may be read-only; never refuse a session over it.
     if let Err(e) = std::fs::write(path, text) {
         log::warn!("cannot write {}: {e}", path.display());
     }
@@ -198,7 +181,6 @@ mod tests {
         };
         assert_eq!(preselect(&sessions, Some("niri"), &last), 2);
         assert_eq!(preselect(&sessions, None, &last), 1);
-        // A default no session has is ignored, not fatal.
         assert_eq!(preselect(&sessions, Some("sway"), &last), 1);
     }
 }

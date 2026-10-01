@@ -1,20 +1,6 @@
-//! A minimal mimic of the iced service surface, so services written in that
-//! style run on guido.
-//!
-//! Such services are state machines pushing `ServiceEvent`s into a
-//! stream built with `Subscription::run_with` + `stream::channel`, plus a
-//! `command()` returning a `Task`. This module provides those exact API
-//! shapes, and [`run_service`] drives them from a guido service task:
-//! events fold into the service value via `update()`, and every
-//! change is published to a guido signal with `set_always` (services have
-//! no meaningful equality — every publish notifies; memos cut off at the
-//! consumer edge).
-//!
-//! Cancellation is inherited from guido: the task is aborted on owner
-//! cleanup, and everything here is polled by it — no detached loops, no
-//! `is_running` polling. A read-only service only pushes, so it runs on
-//! `create_task`; only the command path needs the channel `create_service`
-//! allocates.
+//! A minimal mimic of the iced service API, so iced-style services run on guido.
+//! Everything is polled by one guido task, so aborting it on owner cleanup
+//! cancels the whole pipeline.
 
 use std::any::TypeId;
 use std::future::Future;
@@ -24,7 +10,6 @@ use futures::future::BoxFuture;
 use futures::stream::{BoxStream, FuturesUnordered, Stream, StreamExt};
 use guido::prelude::*;
 
-/// Event stream item produced by a service's `subscribe()`.
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Error is part of the service API; UPower never sends it
 pub enum ServiceEvent<S: ReadOnlyService> {
@@ -52,10 +37,7 @@ pub trait Service: ReadOnlyService {
 pub struct Subscription<T>(BoxStream<'static, T>);
 
 impl<T: Send + 'static> Subscription<T> {
-    /// Matches iced's `Subscription::run_with(id, |_| stream)` call shape.
-    /// The id gives iced subscription identity across view rebuilds; here
-    /// each service is subscribed exactly once by its runner, so it is
-    /// ignored.
+    /// The id is ignored: each service is subscribed exactly once.
     pub fn run_with<St>(_id: TypeId, make: impl FnOnce(&()) -> St) -> Self
     where
         St: Stream<Item = T> + Send + 'static,
@@ -64,9 +46,7 @@ impl<T: Send + 'static> Subscription<T> {
     }
 }
 
-/// `iced::stream::channel` mimic. The driver future and the receiver are
-/// polled together by the consumer, so aborting the runner task drops the
-/// whole pipeline — nothing detached is left behind.
+/// `iced::stream::channel` mimic; the driver is polled with the receiver, not spawned.
 pub fn channel<T, F, Fut>(capacity: usize, f: F) -> impl Stream<Item = T> + Send
 where
     T: Send + 'static,
@@ -78,7 +58,7 @@ where
     futures::stream::select(rx.map(Some), driver).filter_map(|item| async move { item })
 }
 
-/// `iced::Task` mimic covering the constructors the services use.
+/// `iced::Task` mimic.
 pub struct Task<T>(TaskInner<T>);
 
 enum TaskInner<T> {
@@ -101,8 +81,7 @@ impl<T: Send + 'static> Task<T> {
     }
 }
 
-/// `iced::widget::image` mimic: a data-only handle (the UI layer converts
-/// it to a guido `ImageSource`).
+/// `iced::widget::image` mimic.
 pub mod image {
     use std::path::PathBuf;
 
@@ -123,7 +102,7 @@ pub mod image {
     }
 }
 
-/// `iced::widget::svg` mimic, same idea as [`image`].
+/// `iced::widget::svg` mimic.
 pub mod svg {
     use std::path::PathBuf;
 
@@ -137,22 +116,10 @@ pub mod svg {
     }
 }
 
-/// Reactive handle to a running service: `None` until the
-/// service emits `Init`.
-///
-/// Snapshots are published with `set_always` — services hold proxies and
-/// channel handles, so equality is meaningless and every publish must
-/// notify. Fine-grained cutoff belongs to `create_memo` at the consumer
-/// edge (extract the value you render; the memo's `PartialEq` stops the
-/// propagation when it didn't change).
+/// `None` until `Init`. Published with `set_always`, since services have no
+/// meaningful equality; consumers cut off with `create_memo`.
 pub type ServiceSignal<S> = RwSignal<Option<S>>;
 
-/// Drive an iced-style service from a guido service task.
-///
-/// Subscribes to the service's event stream, folds events into the service
-/// value via `update()`, publishes every change as an always-notifying
-/// snapshot, and executes `command()` tasks (their resulting events feed back into
-/// the same loop, like iced's runtime does).
 fn fold<S>(event: ServiceEvent<S>, service: &mut Option<S>, publish: impl Fn(S))
 where
     S: ReadOnlyService + Clone,
@@ -195,7 +162,6 @@ where
     run_readonly_service_hooked::<S>(|_| {})
 }
 
-/// [`run_readonly_service`] plus the raw event hook.
 pub fn run_readonly_service_hooked<S>(
     mut hook: impl FnMut(&ServiceEvent<S>) + Send + 'static,
 ) -> ServiceSignal<S>
@@ -221,10 +187,7 @@ where
     signal
 }
 
-/// [`run_service`] plus a raw event hook, for consumers that react to the
-/// events themselves rather than to folded snapshots (the notifications
-/// list, the OSD). The hook runs on the service task before the event is
-/// folded, the way an iced application sees `ServiceEvent`s.
+/// The hook sees each raw event before it is folded.
 pub fn run_service_hooked<S>(
     mut hook: impl FnMut(&ServiceEvent<S>) + Send + 'static,
 ) -> (ServiceSignal<S>, guido::prelude::Service<S::Command>)
@@ -241,7 +204,7 @@ where
         let mut events = S::subscribe().0;
         let mut service: Option<S> = None;
         let publish = move |s: S| writer.set_always(Some(s));
-        // Driven here rather than spawned, so they end with this service
+        // Driven here rather than spawned, so they end with this service.
         let mut tasks = FuturesUnordered::new();
 
         loop {

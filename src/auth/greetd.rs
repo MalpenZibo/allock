@@ -1,12 +1,6 @@
-//! greetd conversation, used by the greeter.
-//!
-//! The protocol is strictly request/response over `$GREETD_SOCK`: every
-//! request we send gets exactly one response back, so this is written as a
-//! "send, read, decide the next request" loop rather than two independent
-//! halves. Deciding the next request is where we wait on the UI.
-//!
-//! Unlike the lock screen there is no local verdict to make — greetd runs the
-//! PAM stack itself and only tells us whether it worked.
+//! greetd conversation, used by the greeter. The protocol is strictly one
+//! response per request, hence a single send/read/decide loop. greetd runs PAM
+//! itself; there is no local verdict.
 
 use greetd_ipc::codec::TokioCodec;
 use greetd_ipc::{AuthMessageType, ErrorType, Request, Response};
@@ -19,42 +13,30 @@ use zeroize::Zeroizing;
 
 use super::{AuthCommand, AuthEvent};
 
-/// What the UI came back with while the protocol loop was waiting.
 enum Answer {
     Text(Secret),
     Start {
         command: Vec<String>,
         env: Vec<String>,
     },
-    /// Throw the attempt away and start a new session.
     Restart,
-    /// Throw the attempt away and start one for this account, or ask for one.
     User(Option<String>),
-    /// The UI is gone.
     Closed,
 }
 
-/// What goes to greetd next.
 enum Outgoing {
     Request(Request),
-    /// The answer to a prompt, written by [`write_answer`] so that the
-    /// password never passes through a `String`.
+    /// Written by [`write_answer`], never through a `String`.
     Answer(Secret),
 }
 
-/// Where the loop goes after handling one response.
 enum Step {
-    /// Send this next, staying in the same greetd session.
     Send(Outgoing),
-    /// Cancel the session greetd holds, then create a new one. greetd keeps
-    /// the session under configuration until told otherwise — after the user
-    /// abandons an attempt, and after an error too — and rejects every
-    /// `create_session` meanwhile with "a session is already being
-    /// configured".
+    /// greetd rejects `create_session` while a session, even a failed one, is
+    /// still being configured, so it must be cancelled first.
     CancelAndRestart,
-    /// `CancelAndRestart`, for another account — `None` asks for its name.
+    /// `None` asks for the name.
     CancelAndSwitch(Option<String>),
-    /// Nothing left to do.
     Stop,
 }
 
@@ -96,9 +78,7 @@ pub async fn run(
         }
     };
 
-    // `None` means "ask in the form". Once known, the name is reused after a
-    // failed attempt so the user only retypes the password. The user picker
-    // replaces it with `SetUser`.
+    // `None` asks in the form; once known, the name survives failed attempts.
     let mut user = configured_user.filter(|u| !u.trim().is_empty());
 
     'session: loop {
@@ -174,8 +154,7 @@ async fn handle(
                     Answer::Text(answer) => Step::Send(Outgoing::Answer(answer)),
                     Answer::Restart => Step::CancelAndRestart,
                     Answer::User(user) => Step::CancelAndSwitch(user),
-                    // Nothing to start before authenticating: answer with
-                    // nothing rather than stalling greetd.
+                    // Answer empty rather than stall greetd.
                     Answer::Start { .. } => {
                         Step::Send(Outgoing::Request(Request::PostAuthMessageResponse {
                             response: None,
@@ -217,9 +196,8 @@ async fn handle(
             }
         }
 
-        // The second Success acknowledges `StartSession`. greetd starts the
-        // session only once the greeter process has exited, so the greeter
-        // has to go now — see `greetd-ipc(7)`.
+        // Acknowledges `StartSession`; greetd starts the session only once
+        // the greeter has exited (`greetd-ipc(7)`).
         Response::Success => {
             let _ = event_tx
                 .send(AuthEvent::Info("Starting session…".to_owned()))
@@ -236,8 +214,6 @@ async fn handle(
             let _ = event_tx
                 .send(AuthEvent::Failed("Incorrect password".to_owned()))
                 .await;
-            // greetd keeps the failed session as the one being configured:
-            // it has to be cancelled before the next attempt can start.
             Step::CancelAndRestart
         }
 
@@ -247,15 +223,13 @@ async fn handle(
         } => {
             log::error!("greetd error: {description}");
             let _ = event_tx.send(AuthEvent::Error(description)).await;
-            // An error that comes back on every attempt would otherwise have
-            // the loop and greetd spinning as fast as they can talk.
+            // Keeps a persistent error from spinning the loop.
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             Step::CancelAndRestart
         }
     }
 }
 
-/// Ask the form for a user name, ignoring blank answers.
 async fn ask_username(
     cmd_rx: &mut mpsc::Receiver<AuthCommand>,
     event_tx: &mpsc::Sender<AuthEvent>,
@@ -272,8 +246,6 @@ async fn ask_username(
             Answer::Text(name) if !name.expose().trim().is_empty() => {
                 return Some(name.expose().trim().to_owned());
             }
-            // Picked from the list while the form was asking: that is the
-            // answer. "Other…" again is what is already being asked.
             Answer::User(Some(name)) => return Some(name),
             Answer::Closed => return None,
             _ => continue,
@@ -281,18 +253,13 @@ async fn ask_username(
     }
 }
 
-/// Cancel the in-flight session. Returns false if the connection is gone.
-///
-/// After an auth error greetd's session worker has already exited, so the
-/// cancel may be answered with an error of its own (the worker's socket is
-/// closed). greetd has dropped the session all the same; only the connection
-/// matters here.
+/// False if the connection is gone. After an auth error the cancel may be
+/// answered with an error, but greetd has dropped the session regardless.
 async fn cancel(stream: &mut UnixStream, event_tx: &mpsc::Sender<AuthEvent>) -> bool {
     if !write(stream, &Request::CancelSession, event_tx).await {
         return false;
     }
-    // Drain the acknowledgement: leaving it queued would desynchronise every
-    // later request from its response.
+    // Drain the reply, or every later response is off by one.
     read(stream, event_tx).await.is_some()
 }
 
@@ -313,14 +280,9 @@ async fn write(
     }
 }
 
-/// `post_auth_message_response`, written without the answer passing through a
-/// `String` or a buffer that is freed unwiped.
-///
-/// greetd's framing is a native-endian `u32` length and a JSON body.
-/// `greetd_ipc` would take the answer as a `String` and serialize it into a
-/// `Vec` it drops as it is; here the JSON is written straight from the
-/// secret's `&str` into a buffer reserved large enough never to grow — JSON
-/// escapes a byte into at most six — and wiped when it drops.
+/// `post_auth_message_response` without `greetd_ipc`, which would leave the
+/// answer in an unwiped `String` and `Vec`. Framing: native-endian `u32`
+/// length, then the JSON body.
 async fn write_answer(
     stream: &mut UnixStream,
     answer: &Secret,
@@ -346,8 +308,8 @@ async fn write_answer(
     }
 }
 
-/// The JSON body of a `post_auth_message_response`, in a buffer that never
-/// reallocates and is wiped when it drops.
+/// In a buffer that never reallocates (JSON escapes a byte into at most six)
+/// and is wiped on drop.
 fn encode_answer(answer: &str) -> Option<Zeroizing<Vec<u8>>> {
     #[derive(Serialize)]
     struct PostAuthMessageResponse<'a> {
@@ -402,8 +364,7 @@ mod tests {
             })
             .unwrap();
             assert_eq!(*body, expected, "{answer:?}");
-            // Grown means reallocated, and a reallocation frees the old
-            // buffer unwiped.
+            // A reallocation would free the old buffer unwiped.
             assert_eq!(body.capacity(), 64 + 6 * answer.len(), "{answer:?}");
         }
     }

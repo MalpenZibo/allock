@@ -1,7 +1,4 @@
-//! Design tokens, after Bento's scales: spacing, radii and type by role.
-//!
-//! Bento's defaults throughout, except the display sizes, which are a lock
-//! screen's rather than a web page's: the clock is the largest thing here.
+//! Design tokens, after Bento's scales. The display sizes are larger, for the clock.
 
 #![allow(dead_code)] // a scale is kept whole, used or not
 
@@ -25,7 +22,6 @@ pub mod radius {
     pub const R16: f32 = 16.0;
 }
 
-/// Glyph sizes, Bento's icon scale.
 pub mod icon_size {
     pub const I16: f32 = 16.0;
     pub const I24: f32 = 24.0;

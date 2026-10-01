@@ -1,17 +1,9 @@
-//! Authentication, modelled as a conversation.
+//! Authentication as a conversation: PAM, greetd and polkit's helper all
+//! become a stream of [`AuthEvent`] driven by [`AuthCommand`], with the
+//! fingerprint reader as a second producer on the same stream.
 //!
-//! PAM, greetd and polkit's helper all work the same way: the backend asks
-//! something ("Password:", "Enter TOTP"), the user answers, and the backend
-//! either accepts, asks again, or fails. Modelling them as a stream of
-//! [`AuthEvent`] driven by [`AuthCommand`] means the lock screen, the greeter
-//! and the polkit dialog share one UI and one state machine, and the
-//! fingerprint reader plugs into the same event stream as a second, parallel
-//! producer.
-//!
-//! **Fail closed.** [`AuthState::authenticated`] is set in exactly one place:
-//! on [`AuthEvent::Success`]. A backend that crashes, a channel that closes,
-//! a D-Bus daemon that disappears — every one of those leaves the flag false
-//! and the screen locked.
+//! Fail closed: [`AuthState::authenticated`] is set only on
+//! [`AuthEvent::Success`]; any crash or closed channel leaves the screen locked.
 
 pub mod fingerprint;
 pub mod greetd;
@@ -25,70 +17,52 @@ use tokio::time::Instant;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 
-// ---------------------------------------------------------------------------
-// Conversation protocol
-// ---------------------------------------------------------------------------
-
-/// One step of an authentication conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthEvent {
-    /// The backend wants an answer. `secret` decides whether the field masks.
+    /// A question; the field is cleared for the answer.
     Prompt { secret: bool, message: String },
-    /// A question asked before anything was answered, where the user may
-    /// already be typing: polkit's helper asks for the password only once
-    /// the fingerprint reader gives up. Shown like a prompt, but the field
-    /// keeps what is in it — that is the answer being written.
+    /// A question the user may already be typing the answer to (polkit asks
+    /// only once the fingerprint reader gives up): the field is kept.
     Asked { secret: bool, message: String },
     /// Informational text from the auth stack.
     Info(String),
     /// Non-fatal error text from the auth stack.
     Error(String),
-    /// Authentication succeeded. The only event that opens the screen.
+    /// The only event that opens the screen.
     Success,
-    /// This attempt failed; the backend has restarted the conversation.
+    /// This attempt was refused; another may follow.
     Failed(String),
-    /// An attempt was read and refused, with nothing to say about it that the
-    /// screen is not already saying. The fingerprint reader's no-match: the
-    /// hint beside the sensor covers the words, this covers the fact.
+    /// A refusal with no message of its own (a fingerprint no-match).
     Rejected,
     /// The backend is gone and will ask nothing more.
     Ended(String),
-    /// greetd accepted the session. It starts once the greeter has exited,
-    /// so this is the greeter's cue to leave.
+    /// greetd starts the session only once the greeter has exited.
     SessionAccepted,
 }
 
 #[derive(Debug)]
 pub enum AuthCommand {
-    /// Answer the outstanding prompt. A `Secret` whatever the prompt, so a
-    /// password is never a `String` on its way to the backend.
+    /// Always a `Secret`, so a password is never a `String` on its way.
     Respond(Secret),
-    /// Abandon this attempt; the backend starts a fresh conversation.
     Restart,
-    /// Greeter only: launch this session now that we are authenticated.
+    /// Greeter only.
     StartSession {
         command: Vec<String>,
         env: Vec<String>,
     },
-    /// Greeter only: authenticate this account instead, abandoning the attempt
-    /// in flight. `None` is "Other…": ask for the name in the form.
+    /// Greeter only. `None` asks for the name in the form.
     SetUser(Option<String>),
 }
 
-/// Which conversation drives this run.
 #[derive(Clone, Debug)]
 pub enum Backend {
-    /// Lock screen: PAM, against the given service name and user.
+    /// Lock screen.
     Pam { service: String, user: String },
-    /// Greeter: greetd over `$GREETD_SOCK`.
+    /// Greeter, over `$GREETD_SOCK`.
     Greetd { user: Option<String> },
-    /// Polkit dialog: polkit's helper, for the request `cookie` names.
+    /// Polkit dialog.
     Polkit { user: String, cookie: String },
 }
-
-// ---------------------------------------------------------------------------
-// Reactive state
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prompt {
@@ -108,60 +82,43 @@ pub struct Notice {
     pub text: String,
 }
 
-/// What the fingerprint indicator shows.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum FingerprintState {
-    /// No reader, no enrolled finger, or fingerprint disabled in config.
     #[default]
     Unavailable,
-    /// Waiting for a finger.
     Waiting,
-    /// A finger is on the sensor and the reader is deciding.
     Reading,
-    /// The last scan was unusable — `String` is fprintd's reason, already
-    /// turned into something a human can act on.
     Retry(String),
-    /// The reader gave up (too many bad scans, or it went away).
     Exhausted,
-    /// Released while nobody is at the machine; the next key wakes it.
+    /// Released while the user is idle; the next key wakes it.
     Resting,
 }
 
-/// Signals the lock screen renders from.
 #[derive(Clone, Copy)]
 pub struct AuthState {
-    /// What the backend is asking. `None` before the first prompt arrives.
     pub prompt: RwSignal<Option<Prompt>>,
-    /// A response is in flight: the field is disabled until the backend
-    /// answers, so a second Enter cannot queue a second attempt.
+    /// Disables the field so a second Enter cannot queue a second attempt.
     pub busy: RwSignal<bool>,
     pub notice: RwSignal<Option<Notice>>,
-    /// How many attempts have been refused. A count rather than a flag,
-    /// because two identical refusals are two events and a signal that stays
-    /// equal notifies nobody — the second wrong password has to be as loud as
-    /// the first.
+    /// A count, not a flag: an unchanged signal notifies nobody, and every
+    /// refusal must be seen.
     pub rejections: RwSignal<u32>,
     /// Set only by [`AuthEvent::Success`].
     pub authenticated: RwSignal<bool>,
     /// Set only by [`AuthEvent::SessionAccepted`], in greeter mode.
     pub session_accepted: RwSignal<bool>,
     pub fingerprint: RwSignal<FingerprintState>,
-    /// What is typed at a visible prompt — a user name. Owned here so the auth
-    /// layer can clear it, and so every output's field mirrors one buffer.
+    /// What is typed at a visible prompt; shared by every output's field.
     pub input: RwSignal<String>,
-    /// What is typed at a secret prompt: guido's `Password`, which keeps it in
-    /// locked, undumpable pages and wipes them, and never hands out a copy.
+    /// Kept in locked, undumpable pages and wiped; never copied out.
     pub password: Password,
-    /// Bumped by the auth task to have the field emptied — after a refusal, on
-    /// a new prompt, on success. A `Password` lives on the UI thread, so the
-    /// task asks rather than clears.
+    /// Bumped by the auth task to have the UI thread, which owns the
+    /// `Password`, empty the field.
     wipes: RwSignal<u32>,
-    /// What to say about a `pam_faillock` lock on the account, as far as
-    /// [`crate::faillock`] can tell ahead of PAM: a warning, never a gate.
+    /// A `pam_faillock` lock as [`crate::faillock`] sees it: a warning, never
+    /// a gate.
     pub locked: RwSignal<Option<String>>,
-    /// The last answer given to a *visible* prompt. In both flows we drive,
-    /// the only thing ever asked in the clear is a user name — the greeter
-    /// uses this to show who is signing in.
+    /// The last answer to a visible prompt, i.e. the user name.
     pub visible_answer: RwSignal<Option<String>>,
 }
 
@@ -183,9 +140,8 @@ impl AuthState {
         }
     }
 
-    /// Whether the outstanding prompt is a secret one. Tracked. Before the
-    /// first prompt the field masks: a name shown as dots is a nuisance, a
-    /// password shown in the clear is not recoverable.
+    /// Tracked. Masks before the first prompt: a password shown in the clear
+    /// is worse than a name shown as dots.
     pub fn asks_secret(&self) -> bool {
         self.prompt
             .get()
@@ -194,7 +150,7 @@ impl AuthState {
             .unwrap_or(true)
     }
 
-    /// Whether the field the prompt is using is empty. Tracked.
+    /// Tracked.
     pub fn field_is_empty(&self) -> bool {
         if self.asks_secret() {
             self.password.is_empty()
@@ -218,14 +174,12 @@ impl AuthState {
         }
     }
 
-    /// Empty both fields; the password is wiped in place.
     pub fn clear_field(&self) {
         self.input.set(String::new());
         self.password.clear();
     }
 }
 
-/// Main-thread handle to the running conversation.
 #[derive(Clone, Copy)]
 pub struct Auth {
     pub state: AuthState,
@@ -233,11 +187,8 @@ pub struct Auth {
 }
 
 impl Auth {
-    /// Answer the outstanding prompt with whatever is in the field.
-    ///
-    /// Enter and the submit arrow both come here. A password is duplicated
-    /// into protected pages of its own rather than taken, so the field keeps
-    /// its dots while the check runs; it is wiped when the answer comes back.
+    /// The password is duplicated into protected pages, not taken, so the
+    /// field keeps its dots until the verdict.
     pub fn submit(&self) {
         let state = self.state;
         if state.busy.get_untracked() || state.authenticated.get_untracked() {
@@ -248,9 +199,7 @@ impl Auth {
             .get_untracked()
             .map(|prompt| prompt.secret)
             .unwrap_or(true);
-        // An empty answer is never a real attempt, and attempts are counted:
-        // pam_faillock locks the account after a handful. Enter on an empty field
-        // used to spend one.
+        // An empty answer would still count towards pam_faillock.
         let answer = if secret {
             if state.password.with_untracked(Secret::is_empty) {
                 return;
@@ -269,12 +218,7 @@ impl Auth {
         self.service.send(AuthCommand::Respond(answer));
     }
 
-    /// Throw away this attempt and start a fresh conversation.
-    ///
-    /// The way out of a stuck prompt: a PAM module can sit on the
-    /// conversation (a fingerprint stage waiting for a finger that never
-    /// comes), and without this the field would take input that PAM is not
-    /// listening for.
+    /// The way out of a PAM module sitting on the conversation.
     pub fn restart(&self) {
         self.state.clear_field();
         self.state.busy.set(false);
@@ -282,10 +226,8 @@ impl Auth {
         self.service.send(AuthCommand::Restart);
     }
 
-    /// Greeter only: sign in as `user` instead, or ask for the name (`None`).
-    ///
-    /// Whatever was typed belongs to the attempt being abandoned — a password
-    /// for the previous account, most likely — so it goes with it.
+    /// Greeter only. Clears the field: it likely holds the previous account's
+    /// password.
     pub fn set_user(&self, user: Option<String>) {
         self.state.clear_field();
         self.state.busy.set(false);
@@ -300,26 +242,16 @@ impl Auth {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Runner
-// ---------------------------------------------------------------------------
-
-/// Fingerprint verification settings, when it should run at all.
 #[derive(Clone, Debug)]
 pub struct FingerprintConfig {
     pub user: String,
     pub retries: u32,
-    /// Whether the user is idle, from [`crate::idle`]. The reader is released
-    /// while they are; `None` keeps it listening for as long as the screen is
-    /// up.
+    /// The reader is released while idle; `None` keeps it always listening.
     pub idle: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
-/// Start the conversation and expose it reactively.
-///
-/// `fingerprint` is only ever `Some` in lock mode: a fprintd match proves the
-/// user's identity, which is all the lock screen needs, but it does not give
-/// greetd a session to start, so the greeter always requires the password.
+/// `fingerprint` is only `Some` in lock mode: a fprintd match gives greetd no
+/// session to start.
 pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let state = AuthState::new();
 
@@ -332,15 +264,12 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let fingerprint_w = state.fingerprint.writer();
     let wipes_w = state.wipes.writer();
     let locked_w = state.locked.writer();
-    // The account whose tally to read. The greeter's changes with the picker
-    // and greetd runs its stack for whoever is typed, so it has none.
+    // The greeter's account changes with the picker, so it has no tally.
     let tally_user = match &backend {
         Backend::Pam { user, .. } | Backend::Polkit { user, .. } => Some(user.clone()),
         Backend::Greetd { .. } => None,
     };
 
-    // The task's requests to empty the field, carried out on the UI thread,
-    // where the `Password` lives. The first run is the count at zero.
     create_effect(move || {
         if state.wipes.get() > 0 {
             state.clear_field();
@@ -354,28 +283,22 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
         let mut conversation = Box::pin(backend.run(cmd_rx, event_tx.clone()));
         let mut conversation_done = false;
 
-        // Held in a FuturesUnordered rather than spawned: dropping this task
-        // drops the reader loop with it, so nothing keeps the fprintd device
-        // claimed after the screen is gone.
+        // Not spawned: dropping this task must drop the reader and its claim.
         let mut readers = FuturesUnordered::new();
         match fingerprint {
             Some(config) => readers.push(fingerprint::run(config, event_tx.clone(), fingerprint_w)),
             None => fingerprint_w.set(FingerprintState::Unavailable),
         }
 
-        // The last sender we hold ourselves: dropped so `event_rx` closes once
-        // the producers are done, instead of parking the loop forever.
+        // So `event_rx` closes once the producers are done.
         drop(event_tx);
 
-        // The only writer, so it can be counted here rather than read back
-        // from a signal a background task has no business reading.
+        // Counted here, as the only writer, rather than read back from signals.
         let mut rejections = 0u32;
-        // Likewise the only writer of the wipe count.
         let mut wipes = 0u32;
 
-        // When to read the tally again: at once, then when what the screen
-        // says about a lock changes, and after every refusal. Never without
-        // an account to read it for.
+        // When to read the faillock tally again: now, when the lock's
+        // description changes, and after every refusal.
         let mut lock_check = tally_user.as_ref().map(|_| Instant::now());
 
         loop {
@@ -448,13 +371,10 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                         .and_then(|lock| lock.next_change(now))
                         .map(|wait| Instant::now() + wait);
                 }
-                // Polled here, where it is owned; a finished reader has
-                // nothing left to say.
                 Some(()) = readers.next() => {}
                 _ = &mut conversation, if !conversation_done => {
                     conversation_done = true;
-                    // Fail closed: the conversation is over and it was not a
-                    // success, so no further answer can ever be accepted.
+                    // Fail closed: no further answer can be accepted.
                     busy_w.set(false);
                     notice_w.set(Some(Notice {
                         level: NoticeLevel::Error,

@@ -8,24 +8,16 @@ use crate::Mode;
 use crate::components::icons::icon;
 use crate::services::upower::BatteryStatus;
 
-/// Only built on the outputs carrying the interface, so the session picker is
-/// always on a screen the user is typing on.
 pub fn view(screen: Screen) -> Container {
     container()
         .width(fill())
-        // Bottom-aligned, not centred: the battery arrives a moment after the
-        // first frame (its reading comes over D-Bus) and is the tallest thing
-        // here, so a centred row would lift the session picker by half the
-        // card's height the moment it did.
+        // Bottom-aligned: the battery arrives late over D-Bus and would lift a centred picker.
         .layout(
             Flex::row()
                 .spacing(space::S8)
                 .cross_alignment(CrossAlignment::End),
         )
-        // Two fill-width sides around the picker share what is left equally,
-        // which is what puts it in the middle of the screen rather than in the
-        // middle of whatever the battery leaves over. With the picker absent —
-        // every lock-mode screen — they still push the battery to the right.
+        // Equal fill-width sides keep the picker centred on the screen.
         .child(container().width(fill()))
         .child(
             (screen.mode == Mode::Greeter)
@@ -46,10 +38,7 @@ fn battery(screen: &Screen) -> Container {
         return container();
     };
 
-    // Memo on the rendered values, not the service: the upower service
-    // republishes on every D-Bus change and holds a connection, so it has no
-    // meaningful equality — the cutoff belongs here, and it has to be over
-    // something comparable, which `BatteryData` is not.
+    // The service republishes on every D-Bus change and has no equality.
     let battery = create_memo(move || {
         let data = service.get()?.system_battery?;
         Some((
@@ -60,9 +49,6 @@ fn battery(screen: &Screen) -> Container {
         ))
     });
 
-    // The card is rebuilt whenever the reading changes, and each rebuild needs
-    // its own frosted surface, so the closure owns a Screen rather than
-    // borrowing the caller's.
     let screen = screen.clone();
     container().child(move || {
         let (capacity, battery_icon, indicator, charging) = battery.get()?;
@@ -74,9 +60,7 @@ fn battery(screen: &Screen) -> Container {
                 .child(
                     container()
                         .padding([space::S12, space::S24])
-                        // Baseline, not Center: the glyph and the reading are
-                        // different sizes, and lining their boxes up leaves
-                        // them floating at unrelated heights.
+                        // Baseline: the glyph and the reading are different sizes.
                         .layout(
                             Flex::row()
                                 .spacing(space::S12)
@@ -91,7 +75,6 @@ fn battery(screen: &Screen) -> Container {
                         .child(
                             text(format!("{capacity}%"))
                                 .typography(tokens::DISPLAY_S)
-                                // Charging tints the reading to match the icon.
                                 .color(if charging { color } else { theme.text })
                                 .nowrap(),
                         ),
@@ -100,10 +83,6 @@ fn battery(screen: &Screen) -> Container {
     })
 }
 
-/// The session to start, between a previous and a next arrow.
-///
-/// Not drawn at all with one session or none: there is nothing to choose, and
-/// the one there is starts anyway.
 fn session_picker(screen: &Screen) -> Option<Container> {
     let sessions = &screen.sessions;
     (sessions.len() > 1).then(|| {

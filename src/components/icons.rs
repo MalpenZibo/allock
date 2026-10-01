@@ -8,10 +8,6 @@ fn nerd_font_family_mono() -> FontFamily {
     FontFamily::name("Symbols Nerd Font Mono")
 }
 
-// ---------------------------------------------------------------------------
-// Icon data types
-// ---------------------------------------------------------------------------
-
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 #[allow(dead_code)]
 pub enum StaticIcon {
@@ -187,13 +183,8 @@ impl StaticIcon {
     }
 }
 
-/// Arbitrary icon character string (always uses Nerd Font).
 #[derive(Clone, PartialEq)]
 pub struct DynamicIcon(pub String);
-
-// ---------------------------------------------------------------------------
-// IconKind — unified icon data: predefined variant OR arbitrary string
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, PartialEq)]
 pub enum IconKind {
@@ -248,16 +239,12 @@ impl From<&str> for IconKind {
     }
 }
 
-// Cross-type IntoVal for Option wrapping (no natural From chain)
+// No `From` chain reaches `Option<IconKind>`.
 impl IntoVal<Option<IconKind>> for StaticIcon {
     fn into_val(self) -> Option<IconKind> {
         Some(IconKind::Static(self))
     }
 }
-
-// ---------------------------------------------------------------------------
-// Icon component
-// ---------------------------------------------------------------------------
 
 #[component]
 pub fn icon(

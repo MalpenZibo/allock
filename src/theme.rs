@@ -1,5 +1,4 @@
-//! Colours resolved once from `[appearance]` and shared through guido's
-//! context.
+//! Colours resolved once from `[appearance]`.
 
 use guido::prelude::Color;
 
@@ -8,16 +7,15 @@ use crate::config::Appearance;
 #[derive(Clone, Copy, Debug)]
 pub struct ThemeColors {
     pub text: Color,
-    /// Dimmed text for secondary labels (date, hints).
     pub text_weak: Color,
     pub background: Color,
-    /// Slightly lifted background for the input field inside the card.
+    /// The card's background.
     pub background_weak: Color,
     pub primary: Color,
     pub success: Color,
     pub warning: Color,
     pub danger: Color,
-    /// Opacity of the login card.
+    /// Opacity of the cards.
     pub opacity: f32,
 }
 

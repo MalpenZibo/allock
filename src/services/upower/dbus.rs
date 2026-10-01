@@ -56,7 +56,7 @@ impl SystemBattery {
         let mut total_devices = 0;
 
         for device in &self.0 {
-            // Skip batteries with zero capacity (non-functional/placeholder batteries)
+            // Zero capacity marks a placeholder battery.
             if let Ok(energy_full) = device.energy_full().await
                 && energy_full == 0.0
             {
@@ -78,12 +78,10 @@ impl SystemBattery {
             }
         }
 
-        // If no real batteries found, return Unknown
         if total_devices == 0 {
             return DeviceState::Unknown;
         }
 
-        // Only report FullyCharged if ALL real batteries are fully charged
         if fully_charged_count == total_devices {
             DeviceState::FullyCharged
         } else if charging {
@@ -100,17 +98,15 @@ impl SystemBattery {
     }
 
     pub async fn percentage(&self) -> anyhow::Result<f64> {
-        // For single battery systems, use UPower's Percentage property directly.
-        // This avoids issues where some hardware (e.g. Framework 13 AMD AI) reports
-        // energy/energy_full as 0 via ACPI, while UPower's own percentage is correct.
+        // Some hardware (e.g. Framework 13 AMD AI) reports zero energy via ACPI
+        // while UPower's Percentage is right.
         if self.0.len() == 1
             && let Ok(pct) = self.0[0].percentage().await
         {
             return Ok(pct);
         }
 
-        // For multiple batteries, calculate from energy values to correctly
-        // weight batteries by capacity (fixes e.g. ThinkPad T480 dual battery).
+        // Weight several batteries by capacity (e.g. ThinkPad T480).
         let mut energy = 0.0;
         let mut energy_full = 0.0;
 
@@ -226,7 +222,6 @@ pub enum UpDeviceKind {
 }
 
 impl UpDeviceKind {
-    /// Convert from u32 to `UpDeviceKind`.
     pub fn from_u32(value: u32) -> Option<Self> {
         match value {
             0 => Some(Self::Unknown),
@@ -251,12 +246,10 @@ impl UpDeviceKind {
         }
     }
 
-    /// Convert to u32.
     pub fn to_u32(self) -> u32 {
         self as u32
     }
 
-    /// Check if this device type is a peripheral input device.
     pub fn is_peripheral(self) -> bool {
         matches!(
             self,
@@ -269,12 +262,10 @@ impl UpDeviceKind {
         )
     }
 
-    /// Check if this device type is a system power source.
     pub fn is_power_source(self) -> bool {
         matches!(self, Self::Battery)
     }
 
-    /// Get a human-readable description.
     pub fn description(self) -> &'static str {
         match self {
             Self::Unknown => "Unknown",

@@ -1,12 +1,10 @@
-//! Shared helpers. `IndicatorState` lives here because the services import it
-//! as `crate::utils::IndicatorState`.
+//! Shared helpers. The services import `crate::utils::IndicatorState`.
 
 use guido::prelude::Color;
 
 use crate::theme::ThemeColors;
 
-/// All four variants exist because the services are typed against them, even
-/// though the battery — allock's only consumer — never reports `Warning`.
+/// The services are typed against all four, though the battery never reports `Warning`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum IndicatorState {

@@ -1,20 +1,9 @@
-//! PAM conversation, used by the lock screen.
+//! PAM conversation, used by the lock screen. `pam_authenticate()` blocks and
+//! calls back into us, so it runs on its own thread.
 //!
-//! `pam_authenticate()` is blocking and drives the conversation by calling
-//! back into us, so PAM gets a dedicated OS thread. The thread and the async
-//! side talk over channels: prompts go out on a tokio channel, answers come
-//! back on a `std::sync::mpsc` one the conversation handler blocks on.
-//!
-//! An attempt starts only once the user has submitted an answer, which then
-//! answers PAM's first question; later questions go to the screen as they
-//! come. Nothing is left waiting in a conversation while the screen sits
-//! idle, so unlocking by fingerprint, Escape or exiting never fails an
-//! attempt that pam_faillock would count.
-//!
-//! Note that `/etc/pam.d/<service>` must exist for this to work at all. On a
-//! typical Linux system `pam_unix` reads `/etc/shadow` through the setuid
-//! `unix_chkpwd` helper, which is what lets allock authenticate without being
-//! privileged itself.
+//! An attempt starts only once the user has submitted an answer, so no
+//! conversation is left pending to fail (and count for pam_faillock) when the
+//! screen is unlocked by fingerprint, Escape or exit.
 
 use std::ffi::{CStr, CString};
 use std::sync::mpsc as sync_mpsc;
@@ -26,38 +15,20 @@ use guido::prelude::Secret;
 
 use super::{AuthCommand, AuthEvent};
 
-/// Stock policies to borrow when allock has none of its own, best first.
-///
-/// `system-auth` on Arch/Fedora/SUSE and `common-auth` on Debian are the
-/// password-checking stacks every other service includes. `login` is the last
-/// resort, and only because something has to be: it pulls in `pam_shells` and
-/// `pam_nologin`, so an `/etc/nologin` file or a shell missing from
-/// `/etc/shells` would make the screen impossible to unlock. See `pam/allock`
-/// for why that matters here.
+/// Stock policies to borrow when allock has none, best first. `login` is a
+/// last resort: its `pam_nologin` and `pam_shells` can make the screen
+/// impossible to unlock.
 const FALLBACK_SERVICES: [&str; 3] = ["system-auth", "common-auth", "login"];
 
 fn service_exists(service: &str) -> bool {
-    // Both directories are searched by libpam; Arch ships defaults in
-    // /usr/lib/pam.d and lets /etc/pam.d override them.
+    // libpam searches both; /etc/pam.d overrides vendor defaults.
     ["/etc/pam.d", "/usr/lib/pam.d"]
         .iter()
         .any(|dir| std::path::Path::new(dir).join(service).is_file())
 }
 
-/// Pick the PAM service to authenticate against, or `None` if nothing usable
-/// exists.
-///
-/// Resolved *before* taking the lock. With no matching `/etc/pam.d` entry PAM
-/// falls back to the `other` policy, which is `pam_deny` on essentially every
-/// distribution — the screen would lock and then refuse every password, with
-/// no way back except a TTY.
-///
-/// Distributions ship a policy alongside the binary, which is why hyprlock
-/// and greetd appear to need no setup. allock is usually built from source,
-/// so borrowing a stock stack keeps `cargo build && allock` working instead
-/// of demanding root before the first run. It is a fallback, not the plan —
-/// installing `pam/allock` is still the right thing, and it is the only way
-/// to choose the stack deliberately.
+/// Must run before locking: without a policy PAM uses `other`, usually
+/// `pam_deny`, and the screen would refuse every password.
 pub fn resolve_service(configured: &str) -> Option<String> {
     if service_exists(configured) {
         return Some(configured.to_owned());
@@ -74,11 +45,9 @@ pub fn resolve_service(configured: &str) -> Option<String> {
     Some((*fallback).to_owned())
 }
 
-/// What the async side hands back to a blocked conversation callback.
 enum Reply {
     Answer(Secret),
-    /// Abandon the attempt: makes the callback fail, which unwinds
-    /// `authenticate()` so a fresh attempt can start.
+    /// Fails the callback, unwinding `authenticate()`.
     Abort,
 }
 
@@ -108,9 +77,6 @@ pub async fn run(
         }
     };
 
-    // Forward UI commands until either side hangs up. `StartSession` is
-    // greeter-only and meaningless here: unlocking reveals the session that
-    // is already running, there is nothing to launch.
     while let Some(command) = cmd_rx.recv().await {
         let reply = match command {
             AuthCommand::Respond(answer) => Reply::Answer(answer),
@@ -122,8 +88,7 @@ pub async fn run(
         }
     }
 
-    // Dropping the sender releases a callback blocked in `recv()`, so the
-    // thread unwinds instead of holding a PAM handle open forever.
+    // Releases a callback blocked in `recv()` so the PAM thread can exit.
     drop(reply_tx);
     let _ = tokio::task::spawn_blocking(move || thread.join()).await;
 }
@@ -152,15 +117,11 @@ fn pam_thread(
         }
     };
 
-    // One context, many attempts: PAM expects a failed `authenticate()` to be
-    // retried on the same handle, and reusing it keeps module state (failure
-    // delays from pam_faildelay, tally counters) intact across attempts.
+    // PAM expects retries on the same handle, keeping module state such as
+    // failure delays and tallies.
     loop {
-        // No attempt starts until there is an answer to start it with. An
-        // attempt left waiting in the conversation fails however it ends —
-        // unlocked by a finger, abandoned with Escape, the process exiting —
-        // and pam_faillock counts every failure: three fingerprint unlocks
-        // used to lock the account for ten minutes.
+        // A pending attempt would fail however it ends, and pam_faillock
+        // counts every failure: wait for an answer before starting one.
         let Some(answer) = context.conversation_mut().wait_for_answer() else {
             return;
         };
@@ -169,7 +130,6 @@ fn pam_thread(
         let outcome = context
             .authenticate(Flag::NONE)
             .and_then(|()| context.acct_mgmt(Flag::NONE));
-        // Unused if PAM never asked; wiped as it drops.
         context.conversation_mut().pending = None;
 
         let event = match outcome {
@@ -184,19 +144,14 @@ fn pam_thread(
         if event_tx.blocking_send(event).is_err() || succeeded {
             return;
         }
-        // The next attempt starts from PAM's first question again, whatever
-        // this one ended on.
         if context.conversation_mut().show_first_prompt().is_err() {
             return;
         }
     }
 }
 
-/// Turn a PAM error code into something worth showing on a lock screen.
-///
-/// Nothing here distinguishes "no such user" from "wrong password" in the UI —
-/// on a lock screen the user is fixed so it makes no difference, and keeping
-/// one message avoids the habit of leaking account existence.
+/// "No such user" and "wrong password" read the same, so as not to leak
+/// account existence.
 fn describe(code: ErrorCode, message: Option<&str>) -> String {
     match code {
         ErrorCode::AUTH_ERR | ErrorCode::USER_UNKNOWN | ErrorCode::CRED_INSUFFICIENT => {
@@ -209,8 +164,7 @@ fn describe(code: ErrorCode, message: Option<&str>) -> String {
         }
         ErrorCode::PERM_DENIED => "Permission denied".to_owned(),
         ErrorCode::AUTHINFO_UNAVAIL => "Authentication service unavailable".to_owned(),
-        // CONV_ERR is what our own Abort reply produces; it is not a failure
-        // the user should be told about.
+        // CONV_ERR comes from our own Abort reply.
         ErrorCode::CONV_ERR | ErrorCode::ABORT => String::new(),
         _ => message.unwrap_or("Authentication failed").to_owned(),
     }
@@ -219,17 +173,14 @@ fn describe(code: ErrorCode, message: Option<&str>) -> String {
 struct Conversation {
     events: mpsc::Sender<AuthEvent>,
     replies: sync_mpsc::Receiver<Reply>,
-    /// The answer an attempt was started with, for PAM's first question.
     pending: Option<Secret>,
-    /// PAM's first question, as it asked it: shown again between attempts.
+    /// Shown again between attempts.
     first_prompt: Option<(bool, String)>,
 }
 
 impl Conversation {
-    /// Block until the user submits an answer. `None` once the UI is gone.
-    ///
-    /// An abandoned attempt here is not a PAM attempt at all — none has
-    /// started — so Escape only puts the first question back.
+    /// `None` once the UI is gone. No PAM attempt is running yet, so Escape
+    /// only shows the first question again.
     fn wait_for_answer(&mut self) -> Option<Secret> {
         loop {
             match self.replies.recv() {
@@ -240,8 +191,6 @@ impl Conversation {
         }
     }
 
-    /// Put PAM's first question back in the field, or the field's own
-    /// "Password" before PAM has asked anything.
     fn show_first_prompt(&self) -> Result<(), ()> {
         let (secret, message) = self
             .first_prompt
@@ -255,7 +204,6 @@ impl Conversation {
     fn ask(&mut self, prompt: &CStr, secret: bool) -> Result<CString, ErrorCode> {
         let message = prompt.to_string_lossy().into_owned();
 
-        // PAM's first question of an attempt: the answer is already here.
         if let Some(answer) = self.pending.take() {
             self.first_prompt = Some((secret, message));
             return CString::new(answer.expose()).map_err(|_| ErrorCode::CONV_ERR);
@@ -266,14 +214,9 @@ impl Conversation {
             .map_err(|_| ErrorCode::CONV_ERR)?;
 
         match self.replies.recv() {
-            // A NUL in the answer cannot come from the text field, but PAM
-            // would silently truncate at it, so refuse instead.
-            //
-            // The one copy of a password outside guido's protected pages:
-            // pam-client2 asks for a `CString`, `strdup`s it for PAM — which
-            // wipes its own copy — and drops ours unwiped. Out of reach here;
-            // the process is undumpable (see `main`), so it cannot reach a
-            // core dump. The `Secret` itself is wiped as it drops.
+            // PAM would silently truncate at a NUL, so refuse it. pam-client2
+            // drops this `CString` unwiped: the one copy outside protected
+            // pages, kept out of core dumps only by the undumpable process.
             Ok(Reply::Answer(answer)) => {
                 CString::new(answer.expose()).map_err(|_| ErrorCode::CONV_ERR)
             }

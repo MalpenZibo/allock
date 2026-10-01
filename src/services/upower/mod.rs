@@ -69,8 +69,7 @@ impl BatteryData {
                 capacity,
                 ..
             } => battery_level_icon(*capacity),
-            // No dedicated unknown battery icon. Use Battery0 as a safe fallback
-            // instead of incorrectly showing a full battery.
+            // No unknown-battery icon; empty is safer than full.
             BatteryData {
                 status: BatteryStatus::Unknown,
                 ..
@@ -325,7 +324,6 @@ impl UPowerService {
                 let percentage = match battery.percentage().await {
                     Ok(pct) => pct as i64,
                     Err(_) => {
-                        // If we can't get percentage data, don't show battery at all
                         return Ok(None);
                     }
                 };
@@ -700,8 +698,7 @@ fn battery_status_from_system_state(state: dbus::DeviceState) -> BatteryStatus {
         dbus::DeviceState::Charging => BatteryStatus::Charging(Duration::ZERO),
         dbus::DeviceState::Discharging => BatteryStatus::Discharging(Duration::ZERO),
         dbus::DeviceState::FullyCharged => BatteryStatus::Full,
-        // PendingCharge/PendingDischarge are transitional, not active discharge.
-        // Do not show time estimates for them.
+        // Pending states are transitional: no time estimate.
         dbus::DeviceState::PendingCharge | dbus::DeviceState::PendingDischarge => {
             BatteryStatus::NotCharging
         }
