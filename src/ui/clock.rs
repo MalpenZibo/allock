@@ -6,6 +6,7 @@ use chrono::{DateTime, Local, Timelike};
 use guido::prelude::*;
 
 use super::Screen;
+use super::tokens::{self, Typography, space};
 
 /// The clock is glass: the glyphs show the wallpaper behind them, blurred.
 ///
@@ -81,13 +82,15 @@ pub fn view(screen: &Screen) -> Container {
     container()
         .layout(
             Flex::column()
-                .spacing(2.0)
+                .spacing(space::S4)
                 .cross_alignment(CrossAlignment::Center),
         )
         // A container draws a box and says nothing about the glyphs inside it,
         // so every colour here is named where it is drawn.
         .child(frosted(
-            text(move || time.get()).font_size(96.0).nowrap().bold(),
+            text(move || time.get())
+                .typography(tokens::DISPLAY_L)
+                .nowrap(),
             theme.text,
             glass,
         ))
@@ -95,7 +98,7 @@ pub fn view(screen: &Screen) -> Container {
             let date = date.get();
             (!date.is_empty()).then(|| {
                 frosted(
-                    text(date).font_size(42.0).nowrap().bold(),
+                    text(date).typography(tokens::HEADLINE_L).nowrap(),
                     theme.text_weak,
                     glass,
                 )

@@ -2,6 +2,7 @@
 
 use guido::prelude::*;
 
+use super::tokens::{self, Typography, radius, space};
 use super::{Screen, picker};
 use crate::Mode;
 use crate::components::icons::icon;
@@ -18,7 +19,7 @@ pub fn view(screen: Screen) -> Container {
         // card's height the moment it did.
         .layout(
             Flex::row()
-                .spacing(10.0)
+                .spacing(space::S8)
                 .cross_alignment(CrossAlignment::End),
         )
         // Two fill-width sides around the picker share what is left equally,
@@ -69,22 +70,27 @@ fn battery(screen: &Screen) -> Container {
 
         Some(
             super::card_surface(&screen)
-                .corners(Corners::squircle(32.0))
+                .corners(Corners::squircle(radius::R16))
                 .child(
                     container()
-                        .padding([12.0, 24.0])
+                        .padding([space::S12, space::S24])
                         // Baseline, not Center: the glyph and the reading are
                         // different sizes, and lining their boxes up leaves
                         // them floating at unrelated heights.
                         .layout(
                             Flex::row()
-                                .spacing(12.0)
+                                .spacing(space::S12)
                                 .cross_alignment(CrossAlignment::Baseline),
                         )
-                        .child(icon().kind(battery_icon).font_size(64.0).color(color))
+                        .child(
+                            icon()
+                                .kind(battery_icon)
+                                .font_size(tokens::DISPLAY_M.size)
+                                .color(color),
+                        )
                         .child(
                             text(format!("{capacity}%"))
-                                .font_size(48.0)
+                                .typography(tokens::DISPLAY_S)
                                 // Charging tints the reading to match the icon.
                                 .color(if charging { color } else { theme.text })
                                 .nowrap(),

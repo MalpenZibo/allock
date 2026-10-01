@@ -4,6 +4,7 @@
 use guido::prelude::*;
 
 use super::Screen;
+use super::tokens::{self, Typography, icon_size, radius, space};
 use crate::Mode;
 use crate::auth::{FingerprintState, NoticeLevel};
 use crate::components::icons::{IconKind, icon};
@@ -43,14 +44,14 @@ const SPINNER_SCALE: f32 = 0.918;
 /// Exact, not a minimum: under the centring column a minimum width grows to
 /// fill the output, and the card grows with it into a full-width band.
 pub(super) const FIELD_WIDTH: f32 = 360.0;
-const AVATAR_SIZE: f32 = 76.0;
+const AVATAR_SIZE: f32 = space::S80;
 
 /// The glyph beside the fingerprint hint, and the spinner that stands in for
 /// it while the sensor is reading.
-const HINT_GLYPH_SIZE: f32 = 15.0;
+const HINT_GLYPH_SIZE: f32 = icon_size::I16;
 
 /// The submit affordance and the spinner that stands in for it.
-const SUBMIT_SIZE: f32 = 18.0;
+const SUBMIT_SIZE: f32 = icon_size::I16;
 
 /// The lift the card is drawn with.
 ///
@@ -137,10 +138,10 @@ fn turning_glyph<M>(
 
 pub fn view(screen: Screen) -> Container {
     let content = container()
-        .padding([28.0, 32.0])
+        .padding(space::S32)
         .layout(
             Flex::column()
-                .spacing(14.0)
+                .spacing(space::S16)
                 .cross_alignment(CrossAlignment::Center),
         )
         .child(avatar(&screen))
@@ -201,7 +202,7 @@ fn credentials(screen: &Screen) -> Container {
                 // Tight: the notice keeps its line even when it has nothing
                 // to say, so the space between the field and the fingerprint
                 // line is this twice over plus that empty line.
-                .spacing(6.0)
+                .spacing(space::S4)
                 .cross_alignment(CrossAlignment::Center),
         )
         .child(field(screen))
@@ -246,13 +247,18 @@ fn invitation(theme: ThemeColors) -> Container {
     container()
         .layout(
             Flex::row()
-                .spacing(12.0)
+                .spacing(space::S12)
                 .cross_alignment(CrossAlignment::Baseline),
         )
-        .child(turning_glyph(LOCK_GLYPH, 24.0, theme.text_weak, false))
+        .child(turning_glyph(
+            LOCK_GLYPH,
+            icon_size::I24,
+            theme.text_weak,
+            false,
+        ))
         .child(
             text("Press any key to unlock")
-                .font_size(17.0)
+                .typography(tokens::TITLE_M)
                 .color(theme.text)
                 .nowrap(),
         )
@@ -262,7 +268,7 @@ fn invitation(theme: ThemeColors) -> Container {
 /// The polkit dialog is one too.
 pub(super) fn card(screen: &Screen, content: Container) -> Container {
     super::card_surface(screen)
-        .corners(Corners::squircle(22.0))
+        .corners(Corners::squircle(radius::R16))
         .shadow(CARD_SHADOW)
         // Turned about its own centre, which is the default pivot. Played by
         // the count of refused attempts, so the second wrong password shakes as
@@ -292,7 +298,7 @@ fn avatar(screen: &Screen) -> Container {
             None => icon()
                 .kind(IconKind::from(ACCOUNT_GLYPH))
                 .color(theme.primary)
-                .font_size(38.0)
+                .font_size(icon_size::I40)
                 .into_any(),
         })
 }
@@ -339,7 +345,7 @@ fn name(screen: &Screen) -> Text {
             // The greeter has nobody yet: the field itself asks.
             .unwrap_or_else(|| "Sign in".to_owned())
     })
-    .font_size(21.0)
+    .typography(tokens::TITLE_L)
     .color(screen.theme.text)
     .nowrap()
 }
@@ -384,7 +390,7 @@ pub(super) fn field(screen: &Screen) -> Container {
 
     container()
         .width(FIELD_WIDTH)
-        .corners(Corners::squircle(14.0))
+        .corners(Corners::squircle(radius::R8))
         // Inset into the card: a step *down* from it, back towards the
         // backdrop colour, so the field reads as a well rather than another
         // panel.
@@ -400,10 +406,10 @@ pub(super) fn field(screen: &Screen) -> Container {
         .state(state.busy, |s| s.border(FIELD_BORDER, theme.primary))
         .child(
             container()
-                .padding([12.0, 16.0])
+                .padding([space::S12, space::S16])
                 .layout(
                     Flex::row()
-                        .spacing(8.0)
+                        .spacing(space::S8)
                         .cross_alignment(CrossAlignment::Center),
                 )
                 .child(
@@ -420,7 +426,7 @@ pub(super) fn field(screen: &Screen) -> Container {
                             ($field:expr) => {
                                 $field
                                     .placeholder(move || prompt_label(&state.prompt.get()))
-                                    .font_size(16.0)
+                                    .font_size(tokens::BODY_L.size)
                                     .color(theme.text)
                                     .placeholder_color(with_alpha(theme.text, 0.4))
                                     .no_caret()
@@ -449,7 +455,7 @@ pub(super) fn field(screen: &Screen) -> Container {
                     keyboard_modifiers().get().caps_lock.then(|| {
                         icon()
                             .kind(IconKind::from(CAPS_LOCK_GLYPH))
-                            .font_size(16.0)
+                            .font_size(icon_size::I16)
                             .color(theme.warning)
                     })
                 })
@@ -470,8 +476,8 @@ fn submit(screen: &Screen) -> Container {
 
     container()
         // The glyph is 18px; the padding is what makes it worth aiming at.
-        .padding(4.0)
-        .corners(10.0)
+        .padding(space::S4)
+        .corners(radius::R8)
         .on_click(move || auth.submit())
         // The affordance that took the attempt is the one that answers for it:
         // press the arrow, or Enter, and the arrow is what starts turning. A
@@ -503,12 +509,12 @@ fn notice(screen: &Screen) -> Container {
     container()
         // Reserved even when empty so the card does not jump on the first
         // failed attempt.
-        .height(20.0)
+        .height(space::S16)
         .layout(Flex::column().main_alignment(MainAlignment::Center))
         .child(move || {
             let notice = state.notice.get().filter(|n| !n.text.is_empty());
             let line = |words: String, color: Color| {
-                Some(text(words).font_size(13.0).color(color).nowrap())
+                Some(text(words).typography(tokens::BODY_S).color(color).nowrap())
             };
             match notice {
                 Some(n) if n.level == NoticeLevel::Error => line(n.text, theme.danger),
@@ -564,7 +570,7 @@ fn fingerprint_hint(screen: &Screen) -> Container {
                 container()
                     .layout(
                         Flex::row()
-                            .spacing(7.0)
+                            .spacing(space::S8)
                             .cross_alignment(CrossAlignment::Baseline),
                     )
                     .opacity(1.0.transition(reveal()).entering_from(0.0))
@@ -599,7 +605,12 @@ fn hint_line(theme: ThemeColors, fingerprint: FingerprintState) -> Vec<Container
         // The same swap the submit arrow makes, for the same reason: the
         // touch is answered where the touch was invited.
         turning_glyph(FINGERPRINT_GLYPH, HINT_GLYPH_SIZE, color, reading),
-        container().child(text(message).font_size(13.0).color(color).nowrap()),
+        container().child(
+            text(message)
+                .typography(tokens::BODY_S)
+                .color(color)
+                .nowrap(),
+        ),
     ]
 }
 

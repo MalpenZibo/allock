@@ -16,6 +16,7 @@ pub mod dialog;
 pub mod form;
 pub mod picker;
 pub mod status;
+pub mod tokens;
 
 use std::rc::Rc;
 
@@ -79,7 +80,7 @@ pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
                     container()
                         .layout(
                             Flex::column()
-                                .spacing(48.0)
+                                .spacing(tokens::space::S40)
                                 .cross_alignment(CrossAlignment::Center),
                         )
                         .child(clock::view(&screen))
@@ -91,7 +92,7 @@ pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
     let bottom = container()
         .width(fill())
         .height(fill())
-        .padding(28.0)
+        .padding(tokens::space::S24)
         .layout(Flex::column().main_alignment(MainAlignment::End))
         .child({
             let screen = screen.clone();

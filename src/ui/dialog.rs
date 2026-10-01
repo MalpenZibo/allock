@@ -11,6 +11,7 @@ use std::rc::Rc;
 use chrono::Local;
 use guido::prelude::*;
 
+use super::tokens::{self, Typography, icon_size, space};
 use super::{Screen, form};
 use crate::Mode;
 use crate::agent::{Outcome, Request};
@@ -21,7 +22,7 @@ use crate::theme::ThemeColors;
 
 /// nf-md-shield_lock, checked against SymbolsNerdFont-Regular's cmap.
 const SHIELD_GLYPH: &str = "\u{f099d}";
-const SHIELD_SIZE: f32 = 34.0;
+const SHIELD_SIZE: f32 = icon_size::I32;
 
 /// How dark the session goes behind the dialog. Enough to say "not now",
 /// not so much that what asked is hidden.
@@ -74,8 +75,8 @@ pub fn view(
     });
 
     let content = container()
-        .padding([24.0, 28.0, 16.0, 28.0])
-        .layout(Flex::column().spacing(18.0))
+        .padding([space::S24, space::S32, space::S16, space::S32])
+        .layout(Flex::column().spacing(space::S16))
         .child(header(&screen, &request.message))
         .child(form::field(&screen))
         .child(notice(&screen));
@@ -97,7 +98,7 @@ fn header(screen: &Screen, message: &str) -> Container {
         .width(form::FIELD_WIDTH)
         .layout(
             Flex::row()
-                .spacing(16.0)
+                .spacing(space::S16)
                 .cross_alignment(CrossAlignment::Start),
         )
         .child(
@@ -109,17 +110,16 @@ fn header(screen: &Screen, message: &str) -> Container {
         .child(
             container()
                 .width(fill())
-                .layout(Flex::column().spacing(4.0))
+                .layout(Flex::column().spacing(space::S4))
                 .child(
                     text("Authentication required")
-                        .font_size(17.0)
-                        .font_weight(FontWeight::BOLD)
+                        .typography(tokens::TITLE_M)
                         .color(theme.text)
                         .nowrap(),
                 )
                 .child(
                     text(message.to_owned())
-                        .font_size(14.0)
+                        .typography(tokens::BODY_M)
                         .color(theme.text_weak),
                 ),
         )
@@ -140,12 +140,13 @@ fn header(screen: &Screen, message: &str) -> Container {
 fn notice(screen: &Screen) -> Container {
     let theme = screen.theme;
     let state = screen.auth.state;
-    let line = move |words: String, color: Color| text(words).font_size(13.0).color(color);
+    let line =
+        move |words: String, color: Color| text(words).typography(tokens::BODY_S).color(color);
 
     container()
         .width(form::FIELD_WIDTH)
-        .height(at_least(20.0))
-        .layout(Flex::column().spacing(4.0))
+        .height(at_least(space::S16))
+        .layout(Flex::column().spacing(space::S4))
         .children(move || {
             let notice = state.notice.get().filter(|n| !n.text.is_empty());
             // PAM's own refusal says it better than the forecast would.

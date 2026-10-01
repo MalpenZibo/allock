@@ -8,6 +8,7 @@
 use guido::prelude::*;
 
 use super::Screen;
+use super::tokens::{self, Type, Typography, icon_size, radius, space};
 use crate::components::icons::{StaticIcon, icon};
 
 /// Exact, for the reason the field's width is: the window the names slide
@@ -16,10 +17,10 @@ use crate::components::icons::{StaticIcon, icon};
 const LABEL_WIDTH: f32 = 200.0;
 
 /// The padding around a name inside its window.
-const LABEL_PADDING: [f32; 2] = [8.0, 14.0];
+const LABEL_PADDING: [f32; 2] = [space::S8, space::S16];
 
 /// The round buttons either side of the name.
-const ARROW_SIZE: f32 = 36.0;
+const ARROW_SIZE: f32 = space::S40;
 
 /// How long a name takes to cross the window.
 const SLIDE_MS: f32 = 260.0;
@@ -45,11 +46,11 @@ pub enum Look {
 }
 
 impl Look {
-    fn font_size(self) -> f32 {
+    fn typography(self) -> Type {
         match self {
-            Look::Card => 15.0,
-            // The size the account name had before it was chosen here.
-            Look::Plain => 21.0,
+            Look::Card => tokens::LABEL_L,
+            // The account name's own style.
+            Look::Plain => tokens::TITLE_L,
         }
     }
 }
@@ -102,7 +103,7 @@ pub fn view(
     container()
         .layout(
             Flex::row()
-                .spacing(12.0)
+                .spacing(space::S12)
                 .cross_alignment(CrossAlignment::Center),
         )
         .child(arrow(screen, StaticIcon::LeftChevron, move || go(-1)))
@@ -129,11 +130,11 @@ fn label(screen: &Screen, names: Vec<String>, choice: Choice, look: Look) -> Con
     let Choice { index, step } = choice;
     let theme = screen.theme;
     let count = names.len();
-    let font_size = look.font_size();
+    let style = look.typography();
 
     let line = move |name: &str, color: Color| {
         text(name.to_owned())
-            .font_size(font_size)
+            .typography(style)
             .color(color)
             .align(TextAlign::Center)
     };
@@ -168,7 +169,7 @@ fn label(screen: &Screen, names: Vec<String>, choice: Choice, look: Look) -> Con
     };
 
     let window = match look {
-        Look::Card => super::card_surface(screen).corners(Corners::squircle(16.0)),
+        Look::Card => super::card_surface(screen).corners(Corners::squircle(radius::R16)),
         // Still clipped: the names slide in from outside it.
         Look::Plain => container().overflow(Overflow::Hidden),
     };
@@ -186,7 +187,12 @@ fn arrow(screen: &Screen, glyph: StaticIcon, on_click: impl Fn() + 'static) -> C
                 .width(fill())
                 .height(fill())
                 .layout(Flex::column().center())
-                .child(icon().kind(glyph).font_size(18.0).color(theme.text)),
+                .child(
+                    icon()
+                        .kind(glyph)
+                        .font_size(icon_size::I16)
+                        .color(theme.text),
+                ),
         )
         .when_hovered(|s| s.lighter(0.08))
         .when_pressed(|s| s.ripple())
