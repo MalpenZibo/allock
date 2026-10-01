@@ -122,7 +122,7 @@ fn notice(screen: &Screen) -> Container {
 
     container()
         .width(form::FIELD_WIDTH)
-        .height(at_least(space::S16))
+        .height(at_least(tokens::BODY_S.line))
         .layout(Flex::column().spacing(space::S4))
         .children(move || {
             let notice = state.notice.get().filter(|n| !n.text.is_empty());

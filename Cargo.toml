@@ -11,7 +11,8 @@ name = "allock"
 path = "src/main.rs"
 
 [dependencies]
-guido = "0.10"
+# main, for set_timeout and line_height until they are released.
+guido = { git = "https://github.com/MalpenZibo/guido", branch = "main" }
 
 # UI / runtime
 chrono = { version = "0.4", default-features = false, features = ["clock", "unstable-locales"] }

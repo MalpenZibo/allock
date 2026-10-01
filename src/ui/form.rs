@@ -1,5 +1,7 @@
 //! The login card: who is logging in, the field, and the last notice.
 
+use std::time::Duration;
+
 use guido::prelude::*;
 
 use super::Screen;
@@ -108,23 +110,20 @@ const REST_MS: f32 = 350.0;
 
 /// Whether the field turns keys away: while resting and through the fade back,
 /// since the compositor's "user is back" is unordered against the waking key.
-fn held(screen: &Screen) -> Memo<bool> {
+fn held(screen: &Screen) -> Signal<bool> {
     let resting = screen.resting;
-    let fading = create_signal(false);
-    let writer = fading.writer();
-    let mut was_resting = false;
+    let held = create_signal(false);
+    // Each run cancels the timer the last one set.
     create_effect(move || {
-        let now = resting.get();
-        if was_resting && !now {
-            writer.set(true);
-            create_task(move |_ctx| async move {
-                tokio::time::sleep(std::time::Duration::from_millis(REST_MS as u64)).await;
-                writer.set(false);
+        if resting.get() {
+            held.set(true);
+        } else {
+            set_timeout(Duration::from_millis(REST_MS as u64), move || {
+                held.set(false)
             });
         }
-        was_resting = now;
     });
-    create_memo(move || resting.get() || fading.get())
+    held.into()
 }
 
 /// The field, notice and fingerprint line, cross-faded with an invitation while
@@ -153,13 +152,16 @@ fn credentials(screen: &Screen) -> Container {
     let inputs = container()
         .opacity((move || if resting.get() { 0.0 } else { 1.0 }).transition(ease()))
         .child(inputs);
-    // Always in the tree: a dynamic child in a `ZStack` takes all the room there is.
-    let invitation = container()
-        .width(fill())
-        .height(fill())
-        .layout(Flex::column().center())
-        .opacity((move || if resting.get() { 1.0 } else { 0.0 }).transition(ease()))
-        .child(invitation(theme));
+    let invitation = move || {
+        resting.get().then(|| {
+            container()
+                .width(fill())
+                .height(fill())
+                .layout(Flex::column().center())
+                .opacity(1.0.transition(ease()).entering_from(0.0).exiting_to(0.0))
+                .child(invitation(theme))
+        })
+    };
 
     container()
         .layout(ZStack::new())
@@ -312,6 +314,7 @@ pub(super) fn field(screen: &Screen) -> Container {
                                 $field
                                     .placeholder(move || prompt_label(&state.prompt.get()))
                                     .font_size(tokens::BODY_L.size)
+                                    .line_height(LineHeight::Absolute(tokens::BODY_L.line))
                                     .color(theme.text)
                                     .placeholder_color(with_alpha(theme.text, 0.4))
                                     .no_caret()
@@ -380,7 +383,7 @@ fn notice(screen: &Screen) -> Container {
 
     container()
         // Reserved even when empty so the card does not jump.
-        .height(space::S16)
+        .height(tokens::BODY_S.line)
         .layout(Flex::column().main_alignment(MainAlignment::Center))
         .child(move || {
             let notice = state.notice.get().filter(|n| !n.text.is_empty());

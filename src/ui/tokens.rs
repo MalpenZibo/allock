@@ -32,28 +32,29 @@ pub mod icon_size {
 #[derive(Clone, Copy, Debug)]
 pub struct Type {
     pub size: f32,
+    pub line: f32,
     pub weight: FontWeight,
 }
 
-const fn ty(size: f32, weight: FontWeight) -> Type {
-    Type { size, weight }
+const fn ty(size: f32, line: f32, weight: FontWeight) -> Type {
+    Type { size, line, weight }
 }
 
-pub const BODY_S: Type = ty(12.0, FontWeight::NORMAL);
-pub const BODY_M: Type = ty(14.0, FontWeight::NORMAL);
-pub const BODY_L: Type = ty(16.0, FontWeight::NORMAL);
-pub const LABEL_S: Type = ty(12.0, FontWeight::MEDIUM);
-pub const LABEL_M: Type = ty(14.0, FontWeight::MEDIUM);
-pub const LABEL_L: Type = ty(16.0, FontWeight::MEDIUM);
-pub const TITLE_S: Type = ty(14.0, FontWeight::SEMI_BOLD);
-pub const TITLE_M: Type = ty(16.0, FontWeight::SEMI_BOLD);
-pub const TITLE_L: Type = ty(22.0, FontWeight::SEMI_BOLD);
-pub const HEADLINE_S: Type = ty(32.0, FontWeight::SEMI_BOLD);
-pub const HEADLINE_M: Type = ty(36.0, FontWeight::SEMI_BOLD);
-pub const HEADLINE_L: Type = ty(40.0, FontWeight::SEMI_BOLD);
-pub const DISPLAY_S: Type = ty(48.0, FontWeight::SEMI_BOLD);
-pub const DISPLAY_M: Type = ty(64.0, FontWeight::SEMI_BOLD);
-pub const DISPLAY_L: Type = ty(96.0, FontWeight::SEMI_BOLD);
+pub const BODY_S: Type = ty(12.0, 18.0, FontWeight::NORMAL);
+pub const BODY_M: Type = ty(14.0, 20.0, FontWeight::NORMAL);
+pub const BODY_L: Type = ty(16.0, 24.0, FontWeight::NORMAL);
+pub const LABEL_S: Type = ty(12.0, 18.0, FontWeight::MEDIUM);
+pub const LABEL_M: Type = ty(14.0, 20.0, FontWeight::MEDIUM);
+pub const LABEL_L: Type = ty(16.0, 24.0, FontWeight::MEDIUM);
+pub const TITLE_S: Type = ty(14.0, 16.0, FontWeight::SEMI_BOLD);
+pub const TITLE_M: Type = ty(16.0, 18.0, FontWeight::SEMI_BOLD);
+pub const TITLE_L: Type = ty(22.0, 24.0, FontWeight::SEMI_BOLD);
+pub const HEADLINE_S: Type = ty(32.0, 36.0, FontWeight::SEMI_BOLD);
+pub const HEADLINE_M: Type = ty(36.0, 40.0, FontWeight::SEMI_BOLD);
+pub const HEADLINE_L: Type = ty(40.0, 44.0, FontWeight::SEMI_BOLD);
+pub const DISPLAY_S: Type = ty(48.0, 56.0, FontWeight::SEMI_BOLD);
+pub const DISPLAY_M: Type = ty(64.0, 72.0, FontWeight::SEMI_BOLD);
+pub const DISPLAY_L: Type = ty(96.0, 104.0, FontWeight::SEMI_BOLD);
 
 pub trait Typography {
     fn typography(self, ty: Type) -> Self;
@@ -61,6 +62,8 @@ pub trait Typography {
 
 impl Typography for Text {
     fn typography(self, ty: Type) -> Self {
-        self.font_size(ty.size).font_weight(ty.weight)
+        self.font_size(ty.size)
+            .line_height(LineHeight::Absolute(ty.line))
+            .font_weight(ty.weight)
     }
 }
