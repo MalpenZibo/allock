@@ -256,6 +256,9 @@ pub fn icon(
     text(move || kind.get().get_str().to_string())
         .color(color)
         .font_size(font_size)
+        // The Nerd Font's own line box is exactly 1em: no room around the ink,
+        // and the glyphs were placed against guido's former 1.2.
+        .line_height(1.2)
         .font_family(move || {
             let i = kind.get();
             if mono.get() {
