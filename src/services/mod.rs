@@ -1,9 +1,9 @@
-//! Background services; today only UPower, on the iced-shaped traits in `compat`.
+//! Everything allock talks to outside its own window, each behind a handle
+//! the interface only reads signals from and sends commands to.
 
-// The shim is general and allock uses only part of it.
-#[allow(dead_code)]
-pub mod compat;
-mod throttle;
-pub mod upower;
-
-pub use compat::{ReadOnlyService, Service, ServiceEvent};
+pub mod auth;
+pub mod battery;
+pub mod clock;
+pub mod handoff;
+pub mod idle;
+pub mod power;

@@ -22,6 +22,8 @@ pub struct Config {
     pub indicators: IndicatorsConfig,
     pub greeter: GreeterConfig,
     pub appearance: Appearance,
+    pub island: IslandConfig,
+    pub handoff: HandoffConfig,
 }
 
 impl Default for Config {
@@ -35,6 +37,8 @@ impl Default for Config {
             indicators: IndicatorsConfig::default(),
             greeter: GreeterConfig::default(),
             appearance: Appearance::default(),
+            island: IslandConfig::default(),
+            handoff: HandoffConfig::default(),
         }
     }
 }
@@ -96,12 +100,11 @@ pub struct BackgroundConfig {
     /// Image behind the form, `~` expanded; unset or unreadable uses the background colour.
     pub path: Option<String>,
     pub fit: BackgroundFit,
-    /// Black scrim over the image, `0.0`–`1.0`.
+    /// Black scrim over the image while someone is at the card, `0.0`–`1.0`.
+    /// Resting darkens it further.
     pub dim: f32,
-    /// Blur radius in logical pixels for the wallpaper behind the cards; `0` disables it.
+    /// Blur radius of the image in logical pixels; `0` leaves it sharp.
     pub blur: f32,
-    /// Card tint over the blurred wallpaper, `0.0`–`1.0`; without a wallpaper cards are opaque.
-    pub card_opacity: f32,
 }
 
 impl Default for BackgroundConfig {
@@ -109,9 +112,8 @@ impl Default for BackgroundConfig {
         Self {
             path: None,
             fit: BackgroundFit::default(),
-            dim: 0.35,
-            blur: 32.0,
-            card_opacity: 0.72,
+            dim: 0.45,
+            blur: 26.0,
         }
     }
 }
@@ -260,80 +262,83 @@ impl Default for GreeterConfig {
     }
 }
 
-#[derive(Deserialize, Clone, Copy, Debug)]
-#[serde(untagged)]
-pub enum AppearanceColor {
-    Simple(HexColor),
-    Complete {
-        base: HexColor,
-        /// Unused, but kept so the untagged variant still matches.
-        #[allow(dead_code)]
-        strong: Option<HexColor>,
-        weak: Option<HexColor>,
-        /// Unused, but kept so the untagged variant still matches.
-        #[allow(dead_code)]
-        text: Option<HexColor>,
-    },
-}
-
-impl AppearanceColor {
-    pub fn base(&self) -> Color {
-        match self {
-            AppearanceColor::Simple(c) => hex_to_color(*c),
-            AppearanceColor::Complete { base, .. } => hex_to_color(*base),
-        }
-    }
-
-    pub fn weak(&self) -> Option<Color> {
-        match self {
-            AppearanceColor::Simple(_) => None,
-            AppearanceColor::Complete { weak, .. } => weak.map(hex_to_color),
-        }
-    }
-}
-
-fn hex_to_color(c: HexColor) -> Color {
-    Color::rgb(c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0)
-}
-
-static PRIMARY: HexColor = HexColor::rgb(250, 179, 135);
-
 /// Colours and font. Unknown keys are ignored rather than rejected.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Appearance {
     pub font_name: Option<String>,
-    /// Opacity of the login card over the background.
-    pub opacity: f32,
-    pub background_color: AppearanceColor,
-    pub primary_color: AppearanceColor,
-    pub warning_color: AppearanceColor,
-    pub success_color: AppearanceColor,
-    pub danger_color: AppearanceColor,
-    pub text_color: AppearanceColor,
+    /// The island, and the seed it starts and ends as.
+    pub island_color: HexColor,
+    /// Behind the wallpaper, and instead of it when there is none.
+    pub background_color: HexColor,
+    pub text_color: HexColor,
+    pub primary_color: HexColor,
+    pub success_color: HexColor,
+    pub warning_color: HexColor,
+    pub danger_color: HexColor,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
         Self {
             font_name: None,
-            opacity: 1.0,
-            background_color: AppearanceColor::Complete {
-                base: HexColor::rgb(30, 30, 46),
-                strong: Some(HexColor::rgb(69, 71, 90)),
-                weak: Some(HexColor::rgb(49, 50, 68)),
-                text: None,
-            },
-            primary_color: AppearanceColor::Complete {
-                base: PRIMARY,
-                strong: None,
-                weak: None,
-                text: Some(HexColor::rgb(30, 30, 46)),
-            },
-            warning_color: AppearanceColor::Simple(HexColor::rgb(224, 175, 104)),
-            success_color: AppearanceColor::Simple(HexColor::rgb(166, 227, 161)),
-            danger_color: AppearanceColor::Simple(HexColor::rgb(243, 139, 168)),
-            text_color: AppearanceColor::Simple(HexColor::rgb(205, 214, 244)),
+            island_color: HexColor::rgb(5, 5, 8),
+            background_color: HexColor::rgb(11, 11, 18),
+            text_color: HexColor::rgb(205, 214, 244),
+            primary_color: HexColor::rgb(250, 179, 135),
+            success_color: HexColor::rgb(166, 227, 161),
+            warning_color: HexColor::rgb(249, 226, 175),
+            danger_color: HexColor::rgb(243, 139, 168),
+        }
+    }
+}
+
+pub fn color(c: HexColor) -> Color {
+    Color::rgb(c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0)
+}
+
+/// The island's resting place. ashell reads the same `[island.seed]`, so the
+/// dot both processes draw across the compositor's cut is the same dot.
+#[derive(Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct IslandConfig {
+    pub seed: SeedConfig,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug)]
+#[serde(default)]
+pub struct SeedConfig {
+    /// Diameter of the seed, in logical pixels.
+    pub size: f32,
+    /// From the top edge of the output to the seed, in logical pixels.
+    pub top: f32,
+}
+
+impl Default for SeedConfig {
+    fn default() -> Self {
+        Self {
+            size: 30.0,
+            top: 6.0,
+        }
+    }
+}
+
+/// Coordination with a bar that folds its island into the seed before the
+/// lock takes the screen, over `org.ashell.Island1`. Optional: without a bar
+/// allock locks at once.
+#[derive(Deserialize, Clone, Copy, Debug)]
+#[serde(default)]
+pub struct HandoffConfig {
+    pub enabled: bool,
+    /// How long the bar has to fold before the session is locked anyway.
+    pub timeout_ms: u64,
+}
+
+impl Default for HandoffConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            timeout_ms: 600,
         }
     }
 }
@@ -490,6 +495,7 @@ mod tests {
         let example: Config = toml::from_str(include_str!("../config.example.toml")).unwrap();
         let (shown, defaults) = (example.appearance, Appearance::default());
         for (shown, default) in [
+            (shown.island_color, defaults.island_color),
             (shown.background_color, defaults.background_color),
             (shown.primary_color, defaults.primary_color),
             (shown.text_color, defaults.text_color),
@@ -497,25 +503,23 @@ mod tests {
             (shown.warning_color, defaults.warning_color),
             (shown.danger_color, defaults.danger_color),
         ] {
-            assert_eq!(shown.base(), default.base());
-            assert_eq!(shown.weak(), default.weak());
+            assert_eq!(shown, default);
         }
-        assert_eq!(shown.opacity, defaults.opacity);
+        let (seed, default) = (example.island.seed, SeedConfig::default());
+        assert_eq!((seed.size, seed.top), (default.size, default.top));
     }
 
     #[test]
     fn a_partial_appearance_keeps_the_other_defaults() {
         let config: Config = toml::from_str("[appearance]\nprimary_color = \"#333333\"").unwrap();
-        let defaults = Appearance::default();
         assert_eq!(
-            config.appearance.primary_color.base(),
+            color(config.appearance.primary_color),
             Color::rgb(0.2, 0.2, 0.2)
         );
         assert_eq!(
-            config.appearance.text_color.base(),
-            defaults.text_color.base()
+            config.appearance.text_color,
+            Appearance::default().text_color
         );
-        assert_eq!(config.appearance.opacity, defaults.opacity);
     }
 
     #[test]

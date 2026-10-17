@@ -1,113 +1,95 @@
-//! The lock screen, one instance per output. Every output gets a surface (the
-//! session-lock protocol requires it); only those selected by `main_output`
-//! draw the interface, and all of them share the same signals.
+//! One screen per output: the wallpaper, the big clock and the island. Every
+//! output is covered; only those `main_output` selects get the clock and the
+//! card, the others keep the island at rest. All of them share the signals.
 
-pub mod clock;
-pub mod dialog;
-pub mod form;
-pub mod picker;
-pub mod status;
-pub mod tokens;
+mod background;
+mod card;
+mod clock;
+mod field;
+pub mod flow;
+mod icons;
+mod island;
+mod rest;
+mod roll;
+#[cfg(test)]
+mod snapshots;
+pub mod theme;
 
 use std::rc::Rc;
 
 use chrono::{DateTime, Local};
 use guido::prelude::*;
+use guido::widget_prelude::*;
 
 use crate::Mode;
-use crate::auth::Auth;
-use crate::config::{BackgroundFit, Config, SessionDef};
-use crate::services::upower::UPowerService;
-use crate::theme::{ThemeColors, with_alpha};
-use crate::user::UserInfo;
+use crate::config::{Config, SessionDef};
+use crate::services::auth::Auth;
+use crate::services::battery::Battery;
+use crate::services::power::Power;
+use crate::system::user::UserInfo;
+use flow::{Flow, Phase};
+use theme::Theme;
 
-/// Everything a lock surface needs. Cheap to clone.
+/// Everything a screen reads. Cheap to clone.
 #[derive(Clone)]
 pub struct Screen {
     pub config: Rc<Config>,
-    pub theme: ThemeColors,
-    pub auth: Auth,
+    pub theme: Theme,
     pub mode: Mode,
-    /// Mutable in greeter mode, where the form asks who is logging in.
-    pub user: RwSignal<Option<UserInfo>>,
-    /// `None` when the battery indicator is off or there is no battery.
-    pub battery: Option<RwSignal<Option<UPowerService>>>,
-    /// Idle for `[auth] idle_timeout`; never set in the greeter.
-    pub resting: Signal<bool>,
-    pub sessions: Rc<Vec<SessionDef>>,
-    pub session: picker::Choice,
-    /// Greeter only. The picker appends an "Other…" entry after these.
-    pub users: Rc<Vec<UserInfo>>,
-    pub user_choice: picker::Choice,
+    pub flow: Flow,
+    pub auth: Auth,
+    pub battery: Signal<Option<Battery>>,
+    pub power: Power,
     pub now: Signal<DateTime<Local>>,
+    pub host: Rc<str>,
+    /// Who is signing in. Greeter: follows the picker.
+    pub user: RwSignal<Option<UserInfo>>,
+    /// Greeter only. "Other…" sits after these, at `users.len()`.
+    pub users: Rc<Vec<UserInfo>>,
+    pub user_choice: RwSignal<usize>,
+    /// Greeter only.
+    pub sessions: Rc<Vec<SessionDef>>,
+    pub session: RwSignal<usize>,
 }
 
-impl Screen {
-    /// The polkit dialog sits over the session and has no wallpaper.
-    fn wallpaper(&self) -> Option<std::path::PathBuf> {
-        match self.mode {
-            Mode::Polkit => None,
-            _ => self.config.background.resolved_path(),
-        }
+/// The island's spring, the one every fold and growth uses: ashell's island
+/// moves on the same curve, so the handoff reads as one motion.
+pub fn spring() -> SpringConfig {
+    SpringConfig {
+        mass: 1.0,
+        stiffness: 230.0,
+        damping: 21.0,
     }
 }
 
-pub fn lock_screen(screen: Screen, output: OutputInfo) -> Container {
-    let theme = screen.theme;
-    let shows_controls = shows_controls(&screen, output.id);
-
-    let centre = container()
-        .width(fill())
-        .height(fill())
-        .layout(Flex::column().center())
-        .child({
-            let screen = screen.clone();
-            move || {
-                shows_controls.get().then(|| {
-                    container()
-                        .layout(
-                            Flex::column()
-                                .spacing(tokens::space::S40)
-                                .cross_alignment(CrossAlignment::Center),
-                        )
-                        .child(clock::view(&screen))
-                        .child(form::view(screen.clone()))
-                })
-            }
-        });
-
-    let bottom = container()
-        .width(fill())
-        .height(fill())
-        .padding(tokens::space::S24)
-        .layout(Flex::column().main_alignment(MainAlignment::End))
-        .child({
-            let screen = screen.clone();
-            move || shows_controls.get().then(|| status::view(screen.clone()))
-        });
+pub fn view(screen: Screen, output: OutputInfo) -> Container {
+    let controls = shows_controls(&screen, output.id);
+    let height = create_signal(0.0f32);
+    let root_ref = create_widget_ref();
+    create_effect(move || height.set(root_ref.layout_rect().get().height));
 
     let root = container()
         .width(fill())
         .height(fill())
-        // Under the wallpaper, so a missing or loading image never shows a
-        // transparent surface.
-        .background(theme.background)
-        // The greeter's pickers are clicked; the lock screen is only typed at.
-        .cursor(match screen.mode {
-            Mode::Greeter | Mode::Polkit => CursorIcon::Default,
-            Mode::Lock | Mode::Preview => CursorIcon::Hidden,
-        })
+        .widget_ref(root_ref)
+        .background(screen.theme.background)
         .layout(ZStack::new())
-        .child(background_image(&screen))
-        .child(scrim(&screen))
-        .child(centre)
-        .child(bottom);
+        .child(background::view(&screen))
+        .child({
+            let screen = screen.clone();
+            move || controls.get().then(|| clock::view(&screen, height.into()))
+        })
+        .child(island::view(&screen, controls.into_signal(), height.into()))
+        .child({
+            let screen = screen.clone();
+            move || controls.get().then(|| field::keyboard(&screen))
+        });
 
-    attach_keys(root, screen)
+    attach_keys(root, &screen)
 }
 
-/// Whether this output draws the interface. A memo over the whole output list,
-/// so unplugging the configured monitor moves the controls to its stand-in.
+/// Whether this output draws the clock and the card. A memo over the whole
+/// output list, so unplugging the chosen monitor moves them to its stand-in.
 fn shows_controls(screen: &Screen, output: OutputId) -> Memo<bool> {
     let selector = screen.config.main_output.clone();
     create_memo(move || {
@@ -129,109 +111,55 @@ fn shows_controls(screen: &Screen, output: OutputId) -> Memo<bool> {
     })
 }
 
-/// Keys the `text_input` declines. Escape on an empty field restarts the
-/// conversation: the only way out of a PAM stage not waiting on the keyboard.
-fn attach_keys(root: Container, screen: Screen) -> Container {
-    let auth = screen.auth;
-    root.on_key_down(move |key, modifiers| {
-        if auth.state.authenticated.get_untracked() {
-            return;
+/// The keys the field declines. Escape empties the field, then rests the
+/// island; in the greeter it restarts the conversation instead, the only way
+/// out of a PAM stage that is not waiting on the keyboard.
+fn attach_keys(root: Container, screen: &Screen) -> Container {
+    let (auth, flow, mode) = (screen.auth, screen.flow, screen.mode);
+    root.on_key_down(move |key, modifiers, _repeat| {
+        match flow.phase.get_untracked() {
+            Phase::Rest => {
+                flow.wake();
+                return EventResponse::Handled;
+            }
+            Phase::Awake => {}
+            _ => return EventResponse::Ignored,
         }
         match key {
-            Key::Escape => {
-                if auth.state.field_is_empty_untracked() {
-                    auth.restart();
-                } else {
-                    auth.state.clear_field();
-                }
-            }
+            Key::Escape if !auth.state.field_is_empty_untracked() => auth.state.clear_field(),
+            Key::Escape if flow.zone.get_untracked().is_some() => flow.zone.set(None),
+            Key::Escape => match mode {
+                Mode::Greeter => auth.restart(),
+                Mode::Lock | Mode::Preview => flow.rest(),
+            },
             Key::Char('u') if modifiers.ctrl => auth.state.clear_field(),
-            _ => {}
+            _ => return EventResponse::Ignored,
         }
+        EventResponse::Handled
     })
 }
 
-const WALLPAPER_FADE_MS: f32 = 400.0;
+/// Lays its children out at their own size, whatever its own, centred
+/// across and at the top: the island's shape springs to the size of what it
+/// shows, and what it shows is never squeezed while it does.
+struct Overhang;
 
-fn background_image(screen: &Screen) -> Option<Container> {
-    let source = ImageSource::Path(screen.wallpaper()?);
-    let fit = match screen.config.background.fit {
-        BackgroundFit::Cover => ContentFit::Cover,
-        BackgroundFit::Contain => ContentFit::Contain,
-        BackgroundFit::Stretch => ContentFit::Fill,
-    };
-
-    // Decoded off the frame, so the first frame goes out without it instead of
-    // leaving the compositor's "locker has not drawn" colour up (~140 ms for a 3K PNG).
-    let wallpaper = image(source).content_fit(fit);
-    let ready = wallpaper.ready();
-
-    // `Contain` is letterboxed by this container's alignment.
-    Some(
-        container()
-            .width(fill())
-            .height(fill())
-            .layout(Flex::column().center())
-            .opacity(
-                (move || if ready.get() { 1.0 } else { 0.0 })
-                    .transition(Transition::new(WALLPAPER_FADE_MS, TimingFunction::EaseOut)),
-            )
-            .child(wallpaper),
-    )
-}
-
-fn scrim(screen: &Screen) -> Option<Container> {
-    let dim = screen.config.background.dim.clamp(0.0, 1.0);
-    if dim <= 0.0 || screen.wallpaper().is_none() {
-        return None;
-    }
-    Some(
-        container()
-            .width(fill())
-            .height(fill())
-            .background(Color::rgba(0.0, 0.0, 0.0, dim)),
-    )
-}
-
-/// A translucent tint over a blurred cut-out of what is behind the card. A lock
-/// surface has nothing composited underneath, so it blurs its own surface.
-pub fn card_surface(screen: &Screen) -> Container {
-    let theme = screen.theme;
-
-    // The polkit dialog floats over the session, so the compositor does the blur.
-    if screen.mode == Mode::Polkit {
-        let card = container()
-            .overflow(Overflow::Hidden)
-            .layout(ZStack::new())
-            .background(with_alpha(
-                theme.background_weak,
-                theme.opacity * screen.config.background.card_opacity.clamp(0.0, 1.0),
-            ));
-        return if screen.config.background.blur > 0.0 {
-            card.backdrop_blur(BackdropBlur::new(0.0).sources(BackdropSources::COMPOSITOR))
-        } else {
-            card
-        };
-    }
-
-    let has_wallpaper = screen.wallpaper().is_some();
-
-    // With no wallpaper there is nothing to reveal, so the card stays opaque.
-    let opacity = if has_wallpaper {
-        theme.opacity * screen.config.background.card_opacity.clamp(0.0, 1.0)
-    } else {
-        theme.opacity
-    };
-
-    let card = container()
-        .overflow(Overflow::Hidden)
-        .layout(ZStack::new())
-        .background(with_alpha(theme.background_weak, opacity));
-
-    let blur = screen.config.background.blur;
-    if has_wallpaper && blur > 0.0 {
-        card.backdrop_blur(BackdropBlur::new(blur).sources(BackdropSources::SURFACE))
-    } else {
-        card
+impl Layout for Overhang {
+    fn layout(
+        &mut self,
+        ctx: &mut LayoutCtx,
+        children: &[WidgetId],
+        constraints: Constraints,
+        origin: (f32, f32),
+    ) -> Size {
+        let size = constraints.constrain(Size::new(0.0, 0.0));
+        let free = Constraints::new(0.0, 0.0, f32::INFINITY, f32::INFINITY);
+        for &child in children {
+            let laid = ctx.layout_child(child, free).unwrap_or_default();
+            let x = origin.0 + (size.width - laid.width) / 2.0;
+            ctx.tree().set_origin(child, x, origin.1);
+        }
+        ctx.set_minimum(Size::new(0.0, 0.0));
+        size
     }
 }

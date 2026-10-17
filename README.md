@@ -4,7 +4,7 @@
     <img src="assets/wordmark-light.svg" alt="allock" height="140">
   </picture>
 </h1>
-<p align="center">A lock screen, greetd greeter and polkit agent for Wayland.</p>
+<p align="center">A lock screen and greetd greeter for Wayland, drawn as an island.</p>
 <p align="center">
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue"></a>
 </p>
@@ -17,17 +17,20 @@
 </p>
 <p align="center">
   <img src="assets/screenshots/greeter.webp" alt="The greeter, with its session picker" width="49%">
-  <img src="assets/screenshots/polkit.webp" alt="The polkit dialog" width="49%">
 </p>
 
 ## ✨ Features
 
 - Lock screen through `ext-session-lock-v1`, one surface per monitor, hotplug included
 - greetd greeter with a user picker and a session picker
-- polkit agent, with the lock screen's card as its dialog
+- One island at the top of the screen: it rests as a pill with the time, comes
+  down to meet you as the login card, and folds back into a dot when you are in
+- Type to unlock: the key that wakes the island is the first character of the password
 - Password through PAM, fingerprint through fprintd (lock screen only)
-- Wallpaper with blur and dim, frosted cards, and a clock
-- Battery indicator
+- A handoff with [ashell](https://github.com/MalpenZibo/ashell): the bar folds
+  its island into the same dot before the lock appears, and grows back out of
+  it after the unlock
+- Blurred wallpaper, a rolling clock, battery ring, suspend, reboot and shut down
 - Multi-monitor: choose which monitors show the controls
 - Remembers the last user and session in the greeter
 - Preview mode to try a theme without locking
@@ -37,16 +40,12 @@
 ```sh
 scripts/install.sh             # lock screen (the default)
 scripts/install.sh --greeter   # greeter
-scripts/install.sh --polkit    # polkit agent
-scripts/install.sh --all       # all three
+scripts/install.sh --all       # both
 ```
-
-Modes combine: `scripts/install.sh --lock --polkit`.
 
 The script builds allock and installs it to `/usr/local/bin`, then what each
 mode needs: the PAM policy `pam/allock` to `/etc/pam.d/allock` for the lock
-screen, the greeter's config under `/etc/greetd`, and the polkit agent's user
-service `allock-polkit.service`, not enabled. Icons need the `Symbols Nerd Font`.
+screen and the greeter's config under `/etc/greetd`.
 
 See [docs/SETUP.md](docs/SETUP.md) to use it as your lock screen and as your
 login screen.
@@ -57,8 +56,9 @@ allock works without a config file. To change it, copy
 [`config.example.toml`](config.example.toml) to `~/.config/allock/config.toml`:
 every key is optional and shown with its default.
 
-The layout is fixed. The config chooses colours, wallpaper, clock format, which
-indicators appear and which monitors show the controls.
+The layout is fixed. The config chooses colours, wallpaper, clock format, the
+seed's size and place, which indicators appear and which monitors show the
+controls.
 
 ## 🔑 Authentication
 
@@ -75,12 +75,11 @@ otherwise keep you out of a session that is already running.
 Wrong passwords count: by default three in fifteen minutes lock the account for
 ten (`/etc/security/faillock.conf`). A fingerprint still unlocks, because it is
 checked by fprintd outside PAM. `faillock --user $USER --reset`, as root, clears
-the count. While the account is locked, the lock screen and the polkit dialog
-say so as soon as they appear, and for how long, reading the count the way
-`faillock` does. It is a warning: the field stays open, and PAM decides.
+the count. While the account is locked, the island says so as soon as it
+appears, and counts down, reading the count the way `faillock` does. It is a warning: the field stays open, and PAM decides.
 
 With `fingerprint = true` (the default) the fingerprint works alongside the
-password: either one unlocks. Set it to `false` to require the password. The
+password while the card is up: either one unlocks. At rest the reader is off. Set it to `false` to require the password. The
 greeter always asks for the password, and greetd checks it with its own policy,
 `/etc/pam.d/greetd`.
 
@@ -109,24 +108,23 @@ user = "greeter"
 The greeter's own options go in `/etc/greetd/allock.toml` under `[greeter]`.
 [docs/SETUP.md](docs/SETUP.md) has the details.
 
-## 🛡️ Polkit agent
+## 🏝️ The island and the handoff
 
-`allock --polkit` is the authentication agent for your session: when a program
-asks polkit for permission (`pkexec`, a disk to mount, a system setting), it
-shows the lock screen's card on a dimmed screen with what is being asked. The
-dialog is modal: it keeps the keyboard until you answer, or cancel with
-Escape.
+The island has one smallest state, the **seed**: a dot of `[island.seed] size`
+pixels, `top` pixels from the top edge. Everything starts and ends there. When
+the lock takes the screen the compositor cuts from the session to the lock
+surface, and no client can animate that cut; when the dot is in the same place
+on both sides, the one thing the eye follows does not move.
 
-It runs as a user service, instead of any other agent (only one can hold a
-session):
+Before locking, allock asks the bar to fold its island into the seed over
+D-Bus (`org.ashell.Island1.PrepareHandoff("lock")` on the session bus), draws
+the seed in its first frame, and grows it. Unlocking does the reverse: the card
+folds into the seed, the session comes back with the bar still a seed, and
+`ResumeAfterHandoff()` lets it grow. logind's `LockedHint` is kept too, so a bar
+restarted mid-lock knows to wait as the seed.
 
-```kdl
-// ~/.config/niri/config.kdl
-spawn-at-startup "systemctl" "--user" "start" "allock-polkit"
-```
-
-polkit checks the password itself, with `/etc/pam.d/polkit-1`, through its
-helper. allock only passes the answers on, so the policy there decides what
-works: with `pam_fprintd` in it, the dialog asks for your finger first. Typing
-the password still works while it waits, and is checked once the reader gives
-up (`pam_fprintd`'s `timeout=` option sets how long that takes).
+The handoff is optional: without a bar allock locks at once, and a bar that
+does not answer within `[handoff] timeout_ms` is not waited for. Nothing but
+"fold" and "resume" goes over it. The greeter does the same on its side of the
+compositor switch: it folds into the seed over the wallpaper, sharpened, which
+is the picture the session starts on.

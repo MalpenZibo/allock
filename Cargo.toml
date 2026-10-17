@@ -1,6 +1,6 @@
 [package]
 name = "allock"
-description = "A lock screen, greetd greeter and polkit agent for Wayland"
+description = "A lock screen and greetd greeter for Wayland, drawn as an island"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
@@ -11,15 +11,15 @@ name = "allock"
 path = "src/main.rs"
 
 [dependencies]
-guido = "0.11.1"
+# The island needs main: group blur, arcs, tabular figures, inset shadows.
+guido = { git = "https://github.com/MalpenZibo/guido", branch = "main" }
+# Battery, shared with ashell.
+ashell-services = { git = "https://github.com/MalpenZibo/ashell", branch = "refactor/upower-ashell-services", features = ["upower"] }
 
 # UI / runtime
 chrono = { version = "0.4", default-features = false, features = ["clock", "unstable-locales"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync", "io-util", "process"] }
 futures = "0.3"
-pin-project-lite = "0.2"
-# Only used by the service shim's image handle type.
-bytes = "1"
 
 # Config
 serde = { version = "1", features = ["derive"] }
@@ -47,6 +47,10 @@ clap = { version = "4.5", default-features = false, features = ["std", "derive",
 anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
+
+[dev-dependencies]
+guido = { git = "https://github.com/MalpenZibo/guido", branch = "main", features = ["testing"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]
 lto = "thin"

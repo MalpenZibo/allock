@@ -1,21 +1,11 @@
-//! allock: a session lock over `ext-session-lock-v1` and PAM, a greetd greeter
-//! (`--greeter`) and a polkit agent (`--polkit`) in one binary.
-//!
-//! The layout is fixed; the config only chooses colours, wallpaper, clock
-//! format and indicators.
+//! allock: a session lock over `ext-session-lock-v1` and PAM, and a greetd
+//! greeter (`--greeter`), drawn as an island that starts and ends as the seed
+//! a bar folds its own island into.
 
-mod agent;
-mod auth;
-mod components;
 mod config;
-mod faillock;
-mod idle;
-mod last_login;
 mod services;
-mod theme;
+mod system;
 mod ui;
-mod user;
-mod utils;
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,11 +14,14 @@ use std::time::Duration;
 use clap::Parser;
 use guido::prelude::*;
 
-use crate::auth::{Backend, FingerprintConfig};
 use crate::config::{Config, SessionDef, SessionOutput};
-use crate::services::compat::run_readonly_service;
-use crate::services::upower::UPowerService;
+use crate::services::auth::{self, Auth, Backend, FingerprintConfig};
+use crate::services::handoff::Handoff;
+use crate::services::{battery, clock, idle, power::Power};
+use crate::system::{last_login, user};
 use crate::ui::Screen;
+use crate::ui::flow::{Flow, Phase};
+use crate::ui::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -37,30 +30,22 @@ pub enum Mode {
     /// The lock screen with the real PAM conversation but without taking the
     /// lock, so a theme can be tried without risking a locked-out session.
     Preview,
-    Polkit,
 }
 
 #[derive(Parser, Debug)]
-#[command(
-    version,
-    about = "Lock screen, greetd greeter and polkit agent for Wayland"
-)]
+#[command(version, about = "Lock screen and greetd greeter for Wayland")]
 struct Args {
     /// Path to the config file (default `~/.config/allock/config.toml`)
     #[arg(short, long)]
     config_path: Option<String>,
 
     /// Run as a greetd greeter instead of a session lock.
-    #[arg(long, conflicts_with_all = ["preview", "polkit"])]
+    #[arg(long, conflicts_with = "preview")]
     greeter: bool,
 
     /// Draw the lock screen without locking; authenticating exits instead.
-    #[arg(long, conflicts_with = "polkit")]
-    preview: bool,
-
-    /// Run as the session's polkit authentication agent, until killed.
     #[arg(long)]
-    polkit: bool,
+    preview: bool,
 }
 
 /// Set when the compositor refuses the lock, so a failed lock does not exit like an unlock.
@@ -77,10 +62,9 @@ async fn main() {
         0 => Ok(()),
         _ => Err(std::io::Error::last_os_error()),
     };
-    let mode = match (args.greeter, args.preview, args.polkit) {
-        (true, _, _) => Mode::Greeter,
-        (_, true, _) => Mode::Preview,
-        (_, _, true) => Mode::Polkit,
+    let mode = match (args.greeter, args.preview) {
+        (true, _) => Mode::Greeter,
+        (_, true) => Mode::Preview,
         _ => Mode::Lock,
     };
 
@@ -113,47 +97,23 @@ async fn main() {
                 std::process::exit(1);
             }
         },
-        // greetd and polkit's helper run PAM on their own side.
-        Mode::Greeter | Mode::Polkit => String::new(),
+        // greetd runs PAM on its own side.
+        Mode::Greeter => String::new(),
     };
 
-    let theme = theme::init(&config.appearance);
-
-    let sessions: Rc<Vec<SessionDef>> = Rc::new(match mode {
-        Mode::Greeter if config.greeter.sessions.is_empty() => config::scan_sessions(),
-        Mode::Greeter => config.greeter.sessions.clone(),
-        Mode::Lock | Mode::Preview | Mode::Polkit => Vec::new(),
-    });
-    if mode == Mode::Greeter && sessions.is_empty() {
-        log::error!(
-            "no sessions found: add [[greeter.session]] entries to {config_path:?} or install \
-             desktop files under /usr/share/wayland-sessions"
-        );
-    }
-
     if config.background.path.is_some() && config.background.resolved_path().is_none() {
-        log::warn!(
-            "background.path is set but unreadable; falling back to the appearance background \
-             colour"
-        );
+        log::warn!("background.path is set but unreadable; using the background colour");
     }
 
     let mut app = App::new();
     if let Some(family) = &config.appearance.font_name {
         app = app.default_font_family(FontFamily::name(family));
     }
-    // The agent has no surface between dialogs.
-    if mode == Mode::Polkit {
-        app = app.quit_on_last_surface(false);
-    }
 
     let config = Rc::new(config);
     let reason = app.run(|_app| match mode {
-        Mode::Lock | Mode::Preview => {
-            run_pam_screen(config.clone(), theme, sessions.clone(), pam_service, mode)
-        }
-        Mode::Greeter => run_greeter(config.clone(), theme, sessions.clone()),
-        Mode::Polkit => agent::run(config.clone(), theme),
+        Mode::Lock | Mode::Preview => run_lock(config.clone(), pam_service.clone(), mode),
+        Mode::Greeter => run_greeter(config.clone()),
     });
 
     match reason {
@@ -162,96 +122,114 @@ async fn main() {
             std::process::exit(1);
         }
         _ if LOCK_REFUSED.load(Ordering::SeqCst) => std::process::exit(1),
-        _ if agent::REGISTRATION_FAILED.load(Ordering::SeqCst) => std::process::exit(1),
         _ => {}
     }
 }
 
-/// The PAM-backed screen: `Mode::Lock` takes the session lock, `Mode::Preview`
-/// draws it on an overlay surface and exits once the password is accepted.
-fn run_pam_screen(
-    config: Rc<Config>,
-    theme: theme::ThemeColors,
-    sessions: Rc<Vec<SessionDef>>,
-    // Resolved against what is installed, unlike config.auth.pam_service.
-    pam_service: String,
-    mode: Mode,
-) {
-    let user = user::current();
-    log::info!("authenticating as {}", user.name);
+/// The parts of a [`Screen`] every mode builds the same way.
+fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
+    Screen {
+        theme: Theme::new(&config.appearance),
+        mode,
+        flow,
+        auth,
+        battery: if config.indicators.battery {
+            battery::watch()
+        } else {
+            create_signal(None).read_only()
+        },
+        power: Power::start(),
+        now: clock::now(),
+        host: system::hostname().into(),
+        user: create_signal(None),
+        users: Rc::new(Vec::new()),
+        user_choice: create_signal(0),
+        sessions: Rc::new(Vec::new()),
+        session: create_signal(0),
+        config,
+    }
+}
 
-    // Form and reader rest together, so the screen never invites a finger the
-    // reader is not listening for.
-    let idle = (config.auth.idle_timeout > 0)
-        .then(|| Duration::from_secs(config.auth.idle_timeout))
-        .and_then(idle::watch);
+/// The PAM-backed screen: `Mode::Lock` takes the session lock once the bar
+/// has folded into the seed, `Mode::Preview` draws on overlay surfaces and
+/// exits once the password is accepted.
+fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
+    let me = user::current();
+    log::info!("authenticating as {}", me.name);
 
+    // The reader listens only while the card is up: a sensor left scanning
+    // warms up, and the island at rest does not ask for a finger.
+    let (reader_rests, reader_rest_rx) = tokio::sync::watch::channel(true);
     let fingerprint = config.auth.fingerprint.then(|| FingerprintConfig {
-        user: user.name.clone(),
+        user: me.name.clone(),
         retries: config.auth.fingerprint_retries,
-        idle: idle.clone(),
+        idle: Some(reader_rest_rx),
     });
-
     let auth = auth::start(
         Backend::Pam {
             service: pam_service,
-            user: user.name.clone(),
+            user: me.name.clone(),
         },
         fingerprint,
     );
 
-    let screen = Screen {
-        theme,
-        auth,
-        mode,
-        user: create_signal(Some(user)),
-        battery: battery_service(&config),
-        resting: idle::resting(idle),
-        sessions,
-        session: ui::picker::Choice::new(0),
-        users: Rc::new(Vec::new()),
-        user_choice: ui::picker::Choice::new(0),
-        now: ui::clock::create(),
-        config,
-    };
-
-    // Half a password is not left in a field nobody is watching.
-    let resting = screen.resting;
-    create_effect(move || {
-        if resting.get() {
-            auth.state.clear_field();
-        }
-    });
-
-    if mode == Mode::Preview {
-        log::warn!("preview mode: the session is NOT locked");
-        // Never Exclusive: a preview must not swallow the session's keyboard.
-        spawn_fullscreen_surfaces(screen, KeyboardInteractivity::OnDemand);
-        create_effect(move || {
-            if auth.state.authenticated.get() {
-                log::info!("authenticated; preview has nothing to unlock, exiting");
-                quit_app();
-            }
-        });
-        return;
-    }
-
-    // guido covers every output, including ones plugged in while locked.
-    lock_session(move |output| ui::lock_screen(screen.clone(), output));
-
-    create_effect(move || {
-        if auth.state.authenticated.get() {
+    let handoff = (mode == Mode::Lock).then(|| Handoff::start(config.handoff));
+    let flow = Flow::start(auth, move || match mode {
+        Mode::Lock => {
             log::info!("authenticated, unlocking");
             unlock_session();
         }
+        _ => {
+            log::info!("authenticated; preview has nothing to unlock, exiting");
+            quit_app();
+        }
     });
 
-    watch_lock_lifecycle();
+    create_effect(move || {
+        let awake = matches!(flow.phase.get(), Phase::Awake);
+        reader_rests.send_replace(!awake);
+    });
+
+    // Away from the keyboard: back to rest.
+    let away = (config.auth.idle_timeout > 0)
+        .then(|| Duration::from_secs(config.auth.idle_timeout))
+        .and_then(idle::watch);
+    let away = idle::resting(away);
+    create_effect(move || {
+        if away.get() {
+            flow.rest();
+        }
+    });
+
+    let screen = screen(config, mode, auth, flow);
+    screen.user.set(Some(me));
+
+    match handoff {
+        None => {
+            log::warn!("preview mode: the session is NOT locked");
+            // Never Exclusive: a preview must not swallow the session's keyboard.
+            spawn_fullscreen_surfaces(screen, KeyboardInteractivity::OnDemand);
+            flow.grow();
+        }
+        Some(handoff) => {
+            handoff.prepare();
+            let locked = std::cell::Cell::new(false);
+            create_effect(move || {
+                // Once: the bar is the seed, or will not answer.
+                if handoff.ready.get() && !locked.replace(true) {
+                    let screen = screen.clone();
+                    lock_session(move |output| ui::view(screen.clone(), output));
+                }
+            });
+            watch_lock_lifecycle(handoff, flow);
+        }
+    }
 }
 
-/// Exit on the `Locked → Unlocked` edge only: `unlock_session()` is a request,
-/// and exiting before the compositor processes it can leave the session locked.
-fn watch_lock_lifecycle() {
+/// Exit on the `Locked → Unlocked` edge only, after telling the bar it may
+/// grow back: `unlock_session()` is a request, and exiting before the
+/// compositor processes it can leave the session locked.
+fn watch_lock_lifecycle(handoff: Handoff, flow: Flow) {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Progress {
         Pending,
@@ -265,39 +243,61 @@ fn watch_lock_lifecycle() {
         let state = lock_state().get();
         match (progress.get_untracked(), state) {
             (_, LockState::Locking) => progress.set(Progress::Requested),
-            (_, LockState::Locked) => progress.set(Progress::Held),
+            (Progress::Held, LockState::Locked) => {}
+            (_, LockState::Locked) => {
+                progress.set(Progress::Held);
+                handoff.locked();
+                // The compositor shows the seed now, where the bar left its own.
+                flow.grow();
+            }
             (Progress::Held, LockState::Unlocked) => {
                 log::info!("session unlocked");
-                quit_app();
+                handoff.resume();
             }
             (Progress::Requested, LockState::Unlocked) => {
                 // Another client holds the lock, or there is no ext-session-lock-v1.
                 log::error!("the compositor refused the session lock");
                 LOCK_REFUSED.store(true, Ordering::SeqCst);
-                quit_app();
+                handoff.resume();
             }
             (Progress::Pending, LockState::Unlocked) => {}
         }
     });
+
+    create_effect(move || {
+        if handoff.resumed.get() {
+            quit_app();
+        }
+    });
 }
 
-fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<SessionDef>>) {
+fn run_greeter(config: Rc<Config>) {
     let configured_user = config
         .greeter
         .user
         .clone()
         .filter(|name| !name.trim().is_empty());
-
     let remembered = if config.greeter.remember {
         last_login::load()
     } else {
         last_login::LastLogin::default()
     };
+    let sessions: Rc<Vec<SessionDef>> = Rc::new(if config.greeter.sessions.is_empty() {
+        config::scan_sessions()
+    } else {
+        config.greeter.sessions.clone()
+    });
+    if sessions.is_empty() {
+        log::error!(
+            "no sessions found: add [[greeter.session]] entries to the config or install \
+             desktop files under /usr/share/wayland-sessions"
+        );
+    }
 
-    // "Other…" sits at `users.len()` and asks for the name in the form. The
-    // preselection is only a suggestion, so remembering never locks anyone out.
+    // "Other…" sits at `users.len()` and asks for the name. The preselection
+    // is only a suggestion, so remembering never locks anyone out.
     let users = Rc::new(user::login_users());
-    let preselected_user = [configured_user.as_deref(), remembered.user.as_deref()]
+    let preselected = [configured_user.as_deref(), remembered.user.as_deref()]
         .into_iter()
         .flatten()
         .find_map(|name| users.iter().position(|user| user.name == name))
@@ -307,47 +307,68 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
     // No fingerprint: greetd runs PAM itself and would not accept a local match.
     let auth = auth::start(
         Backend::Greetd {
-            user: chosen(preselected_user).map(|user| user.name),
+            user: chosen(preselected).map(|user| user.name),
         },
         None,
     );
 
-    let screen = Screen {
-        theme,
-        auth,
-        mode: Mode::Greeter,
-        user: create_signal(chosen(preselected_user)),
-        battery: battery_service(&config),
-        // Nothing to rest: the greeter has no reader to switch off.
-        resting: idle::resting(None),
-        sessions: sessions.clone(),
-        session: ui::picker::Choice::new(last_login::preselect(
-            &sessions,
-            config.greeter.default_session.as_deref(),
-            &remembered,
-        )),
-        users: users.clone(),
-        user_choice: ui::picker::Choice::new(preselected_user),
-        now: ui::clock::create(),
-        config: config.clone(),
+    let session_index = create_signal(last_login::preselect(
+        &sessions,
+        config.greeter.default_session.as_deref(),
+        &remembered,
+    ));
+    let user_index = create_signal(preselected);
+
+    let start_session = {
+        let sessions = sessions.clone();
+        let users = users.clone();
+        let remember = config.greeter.remember;
+        let systemd_cat = match config.greeter.session_output {
+            SessionOutput::Journal => find_in_path("systemd-cat"),
+            SessionOutput::Console => None,
+        };
+        move || {
+            if sessions.is_empty() {
+                log::error!("authenticated but there is no session to start");
+                return;
+            }
+            // The modulo guards a list that shrank.
+            let session = &sessions[session_index.get_untracked() % sessions.len()];
+            log::info!("starting session {}", session.name);
+            if remember {
+                // Before the request: once greetd accepts it this process exits.
+                let user = users
+                    .get(user_index.get_untracked())
+                    .map(|user| user.name.clone())
+                    .or_else(|| auth.state.visible_answer.get_untracked());
+                last_login::save(user.as_deref(), &session.name);
+            }
+            auth.start_session(session.argv(systemd_cat.as_deref()), session.env.clone());
+        }
     };
+    // The session starts once the island has folded and the wallpaper is sharp,
+    // the picture the session opens on.
+    let flow = Flow::start(auth, start_session);
+
+    let mut screen = screen(config, Mode::Greeter, auth, flow);
+    screen.users = users.clone();
+    screen.user_choice = user_index;
+    screen.sessions = sessions;
+    screen.session = session_index;
+    screen.user.set(chosen(preselected));
 
     // A step in the user picker restarts the conversation; the first run is
     // the preselection greetd was started with.
     let user_signal = screen.user;
-    let user_index = screen.user_choice.index;
-    let asked_for = std::cell::Cell::new(preselected_user);
-    create_effect({
-        let users = users.clone();
-        move || {
-            let index = user_index.get();
-            if asked_for.replace(index) == index {
-                return;
-            }
-            let user = users.get(index).cloned();
-            auth.set_user(user.as_ref().map(|user| user.name.clone()));
-            user_signal.set(user);
+    let asked_for = std::cell::Cell::new(preselected);
+    create_effect(move || {
+        let index = user_index.get();
+        if asked_for.replace(index) == index {
+            return;
         }
+        let user = users.get(index).cloned();
+        auth.set_user(user.as_ref().map(|user| user.name.clone()));
+        user_signal.set(user);
     });
 
     // Under "Other…" the name is typed; once it is, show who is signing in.
@@ -355,34 +376,6 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
         if let Some(name) = auth.state.visible_answer.get() {
             user_signal.set(user::by_name(&name));
         }
-    });
-
-    let session_index = screen.session.index;
-    let remember = config.greeter.remember;
-    let systemd_cat = match config.greeter.session_output {
-        SessionOutput::Journal => find_in_path("systemd-cat"),
-        SessionOutput::Console => None,
-    };
-    create_effect(move || {
-        if !auth.state.authenticated.get() {
-            return;
-        }
-        if sessions.is_empty() {
-            log::error!("authenticated but there is no session to start");
-            return;
-        }
-        // The picker wraps already; the modulo guards a list that shrank.
-        let session = &sessions[session_index.get_untracked() % sessions.len()];
-        log::info!("starting session {}", session.name);
-        if remember {
-            // Before the request: once greetd accepts it this process exits.
-            let user = users
-                .get(user_index.get_untracked())
-                .map(|user| user.name.clone())
-                .or_else(|| auth.state.visible_answer.get_untracked());
-            last_login::save(user.as_deref(), &session.name);
-        }
-        auth.start_session(session.argv(systemd_cat.as_deref()), session.env.clone());
     });
 
     // greetd starts the session only once the greeter has exited (`greetd-ipc(7)`).
@@ -394,6 +387,7 @@ fn run_greeter(config: Rc<Config>, theme: theme::ThemeColors, sessions: Rc<Vec<S
     });
 
     spawn_fullscreen_surfaces(screen, KeyboardInteractivity::Exclusive);
+    flow.grow();
 }
 
 /// One fullscreen overlay per output, following hotplug.
@@ -423,7 +417,7 @@ fn spawn_fullscreen_surfaces(screen: Screen, keyboard: KeyboardInteractivity) {
                     .namespace("allock")
                     .output(output.id)
                     .background_color(screen.theme.background),
-                move || ui::lock_screen(screen.clone(), info.clone()),
+                move || ui::view(screen.clone(), info.clone()),
             );
             handles.insert(output.id, handle);
         }
@@ -436,13 +430,6 @@ fn spawn_fullscreen_surfaces(screen: Screen, keyboard: KeyboardInteractivity) {
             connected
         });
     });
-}
-
-fn battery_service(config: &Config) -> Option<RwSignal<Option<UPowerService>>> {
-    config
-        .indicators
-        .battery
-        .then(run_readonly_service::<UPowerService>)
 }
 
 /// The first executable called `name` on `$PATH`.

@@ -1,0 +1,213 @@
+//! The screens drawn offscreen into PNGs under `target/snapshots`, to look
+//! at a change without locking anything:
+//!
+//! ```sh
+//! cargo test snapshots -- --ignored --nocapture
+//! ```
+
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+use guido::prelude::*;
+use guido::testing::Headless;
+
+use super::flow::{Flow, Phase};
+use crate::Mode;
+use crate::config::{Config, SessionDef};
+use crate::services::auth::{self, Backend, Notice, NoticeLevel};
+use crate::system::user::UserInfo;
+
+const WIDTH: u32 = 1280;
+const HEIGHT: u32 = 800;
+
+fn out_dir() -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/snapshots");
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// A dusk over hills, the mockup's own wallpaper, drawn by hand.
+fn wallpaper() -> PathBuf {
+    let path = out_dir().join("wallpaper.png");
+    let (w, h) = (1600u32, 900u32);
+    let sky = |t: f32| -> [f32; 3] {
+        let stops = [
+            (0.0, [27.0, 24.0, 52.0]),
+            (0.55, [74.0, 54.0, 87.0]),
+            (0.78, [196.0, 111.0, 106.0]),
+            (1.0, [242.0, 164.0, 119.0]),
+        ];
+        let i = stops
+            .iter()
+            .rposition(|(at, _)| *at <= t)
+            .unwrap_or(0)
+            .min(2);
+        let ((a, ca), (b, cb)) = (stops[i], stops[i + 1]);
+        let k = ((t - a) / (b - a)).clamp(0.0, 1.0);
+        [0, 1, 2].map(|c| ca[c] + (cb[c] - ca[c]) * k)
+    };
+    let image = ::image::RgbImage::from_fn(w, h, |x, y| {
+        let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+        let hill = 0.62 + 0.06 * (fx * 9.0).sin() + 0.03 * (fx * 23.0).cos();
+        let sun = ((fx - 0.7).powi(2) * 3.0 + (fy - 0.6).powi(2)).sqrt() < 0.07;
+        let rgb = if fy > 0.76 {
+            [30.0, 22.0, 46.0]
+        } else if fy > hill {
+            [52.0, 38.0, 70.0]
+        } else if sun {
+            [255.0, 211.0, 161.0]
+        } else {
+            sky(fy / 0.76)
+        };
+        ::image::Rgb(rgb.map(|c| c as u8))
+    });
+    image.save(&path).unwrap();
+    path
+}
+
+struct Scene {
+    app: Headless,
+    surface: SurfaceId,
+    screen: super::Screen,
+    clock: Instant,
+}
+
+impl Scene {
+    fn new(mode: Mode) -> Option<Self> {
+        let mut app = Headless::new()?;
+        let output = app.connect_output("eDP-1");
+
+        let mut config = Config::default();
+        config.background.path = Some(wallpaper().to_string_lossy().into_owned());
+        // UPower is not asked from a test; the ring is given a reading.
+        config.indicators.battery = false;
+        let config = Rc::new(config);
+
+        let auth = auth::start(Backend::Silent, None);
+        let flow = Flow::start(auth, || {});
+        let mut screen = crate::screen(config, mode, auth, flow);
+        screen.battery = create_signal(Some(crate::services::battery::Battery {
+            percent: 59,
+            charging: false,
+        }))
+        .read_only();
+        screen.user.set(Some(UserInfo {
+            name: "zibo".to_owned(),
+            display_name: "Zibo".to_owned(),
+            avatar: None,
+        }));
+        if mode == Mode::Greeter {
+            screen.users = Rc::new(vec![
+                UserInfo {
+                    name: "zibo".to_owned(),
+                    display_name: "Zibo".to_owned(),
+                    avatar: None,
+                },
+                UserInfo {
+                    name: "guest".to_owned(),
+                    display_name: "Guest".to_owned(),
+                    avatar: None,
+                },
+            ]);
+            screen.sessions = Rc::new(
+                ["Niri", "Hyprland", "GNOME"]
+                    .map(|name| SessionDef {
+                        name: name.to_owned(),
+                        command: vec![name.to_lowercase()],
+                        env: Vec::new(),
+                    })
+                    .into(),
+            );
+        }
+
+        let info = outputs()
+            .get_untracked()
+            .into_iter()
+            .find(|info| info.id == output)?;
+        let drawn = screen.clone();
+        let surface = app.surface(
+            SurfaceConfig::new()
+                .width(0)
+                .height(0)
+                .anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT),
+            move || super::view(drawn, info),
+        );
+        app.configure(surface, WIDTH, HEIGHT, 1.0);
+        app.enter_output(surface, output);
+        let mut scene = Self {
+            app,
+            surface,
+            screen,
+            clock: Instant::now(),
+        };
+        scene.run(Duration::from_millis(50));
+        Some(scene)
+    }
+
+    /// Frames at 60 Hz for `span` of the scene's own time.
+    fn run(&mut self, span: Duration) {
+        let frames = span.as_millis() / 16;
+        for _ in 0..frames.max(1) {
+            self.clock += Duration::from_millis(16);
+            self.app.step_at(self.clock);
+            self.app.wait_for_image_decodes();
+        }
+    }
+
+    fn settle(&mut self, phase: Phase) {
+        self.screen.flow.phase.set(phase);
+        self.run(Duration::from_millis(1600));
+    }
+
+    fn save(&self, name: &str) {
+        let pixels = self.app.read_frame(self.surface);
+        let path = out_dir().join(format!("{name}.png"));
+        ::image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
+            .unwrap()
+            .save(&path)
+            .unwrap();
+        println!("{}", path.display());
+    }
+}
+
+#[test]
+#[ignore = "draws PNGs to look at, asserts nothing"]
+fn snapshots() {
+    let Some(mut lock) = Scene::new(Mode::Lock) else {
+        eprintln!("no GPU adapter; nothing drawn");
+        return;
+    };
+    lock.save("lock-0-seed");
+    lock.screen.flow.grow();
+    lock.settle(Phase::Rest);
+    lock.save("lock-1-rest");
+    lock.settle(Phase::Awake);
+    lock.save("lock-2-card");
+    let state = lock.screen.auth.state;
+    state.password.set(Secret::from("hunter2".to_owned()));
+    lock.run(Duration::from_millis(600));
+    lock.save("lock-3-typed");
+    state.password.clear();
+    state.notice.set(Some(Notice {
+        level: NoticeLevel::Error,
+        text: "Wrong password".to_owned(),
+    }));
+    lock.run(Duration::from_millis(800));
+    lock.save("lock-4-refused");
+    lock.screen.flow.zone.set(Some(super::flow::Zone::Power));
+    lock.run(Duration::from_millis(800));
+    lock.save("lock-5-power");
+    // The flow's own timers run on the wall clock: the tick shows for 600 ms.
+    state.authenticated.set(true);
+    lock.run(Duration::from_millis(400));
+    lock.save("lock-6-ok");
+
+    let mut greeter = Scene::new(Mode::Greeter).unwrap();
+    greeter.settle(Phase::Rest);
+    greeter.save("greeter-1-rest");
+    greeter.settle(Phase::Awake);
+    greeter.save("greeter-2-card");
+    greeter.settle(Phase::Gone);
+    greeter.save("greeter-3-gone");
+}

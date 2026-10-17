@@ -3,13 +3,11 @@
 #
 #   scripts/install.sh                    the lock screen (the default)
 #   scripts/install.sh --greeter          the greeter
-#   scripts/install.sh --polkit           the polkit agent
-#   scripts/install.sh --lock --polkit    modes combine
-#   scripts/install.sh --all              all three
+#   scripts/install.sh --lock --greeter   modes combine
+#   scripts/install.sh --all              both
 #
 # The binary is always installed. The lock screen adds its PAM policy, the
-# greeter its own config, wallpaper, cache directory and niri config, the
-# polkit agent its user service (not enabled).
+# greeter its own config, wallpaper, cache directory and niri config.
 #
 # Run it as yourself, not as root: it builds with your toolchain and asks sudo
 # only for the steps that write outside your home. It never edits
@@ -18,8 +16,7 @@
 # Options:
 #   --lock       install the lock screen
 #   --greeter    install the greeter
-#   --polkit     install the polkit agent
-#   --all        install all three
+#   --all        install both
 #   --force      overwrite greeter files that already exist
 #   --prefix P   install under P instead of /usr/local
 #   --wallpaper F  the greeter's wallpaper (default: GREETER_WALLPAPER below)
@@ -34,26 +31,24 @@ PREFIX=/usr/local
 GREETER_WALLPAPER="$HOME/.config/niri-wallpaper/library/Abstract - Nature.jpg"
 LOCK=0
 GREETER=0
-POLKIT=0
 FORCE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --lock) LOCK=1 ;;
         --greeter) GREETER=1 ;;
-        --polkit) POLKIT=1 ;;
-        --all) LOCK=1 GREETER=1 POLKIT=1 ;;
+        --all) LOCK=1 GREETER=1 ;;
         --force) FORCE=1 ;;
         --prefix) PREFIX="$2"; shift ;;
         --wallpaper) GREETER_WALLPAPER="$2"; shift ;;
-        -h | --help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h | --help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
     shift
 done
 
 # No mode named: the lock screen, which is what most installs are for.
-if [[ $LOCK -eq 0 && $GREETER -eq 0 && $POLKIT -eq 0 ]]; then
+if [[ $LOCK -eq 0 && $GREETER -eq 0 ]]; then
     LOCK=1
 fi
 
@@ -101,10 +96,6 @@ step "Installing the binary"
 sudo install -Dm755 "$REPO/target/release/allock" "$BIN"
 echo "    $BIN"
 
-if ! fc-list | grep -qi "Symbols Nerd Font"; then
-    echo "    note: no 'Symbols Nerd Font' installed; icons will render as boxes"
-fi
-
 # What to tell the user at the end, one paragraph per mode installed.
 NEXT=()
 
@@ -124,23 +115,6 @@ if [[ $LOCK -eq 1 ]]; then
 
     NEXT+=("Lock screen: run \`allock --preview\` to try it, then bind \`allock\` to a key
 and to your idle daemon. See docs/SETUP.md.")
-fi
-
-# ---------------------------------------------------------------------------
-# Polkit agent
-# ---------------------------------------------------------------------------
-
-if [[ $POLKIT -eq 1 ]]; then
-    # polkit checks the password itself, with /etc/pam.d/polkit-1: the agent
-    # needs no PAM policy of its own.
-    step "Installing the polkit agent's user service"
-    sed "s|@BIN@|$BIN|" "$REPO/systemd/allock-polkit.service" |
-        sudo install -Dm644 /dev/stdin "$PREFIX/lib/systemd/user/allock-polkit.service"
-    echo "    $PREFIX/lib/systemd/user/allock-polkit.service (not enabled)"
-
-    NEXT+=("Polkit agent: stop any other agent, then start it from your session, e.g. in niri
-    spawn-at-startup \"systemctl\" \"--user\" \"start\" \"allock-polkit\"
-or run: systemctl --user enable --now allock-polkit")
 fi
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-//! Authentication as a conversation: PAM, greetd and polkit's helper all
+//! Authentication as a conversation: PAM and greetd both
 //! become a stream of [`AuthEvent`] driven by [`AuthCommand`], with the
 //! fingerprint reader as a second producer on the same stream.
 //!
@@ -8,9 +8,10 @@
 pub mod fingerprint;
 pub mod greetd;
 pub mod pam;
-pub mod polkit;
 
 use guido::prelude::*;
+
+pub use crate::system::faillock::Lock;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -21,9 +22,6 @@ use futures::stream::FuturesUnordered;
 pub enum AuthEvent {
     /// A question; the field is cleared for the answer.
     Prompt { secret: bool, message: String },
-    /// A question the user may already be typing the answer to (polkit asks
-    /// only once the fingerprint reader gives up): the field is kept.
-    Asked { secret: bool, message: String },
     /// Informational text from the auth stack.
     Info(String),
     /// Non-fatal error text from the auth stack.
@@ -60,8 +58,9 @@ pub enum Backend {
     Pam { service: String, user: String },
     /// Greeter, over `$GREETD_SOCK`.
     Greetd { user: Option<String> },
-    /// Polkit dialog.
-    Polkit { user: String, cookie: String },
+    /// Asks nothing and answers nothing: a screen drawn in a test.
+    #[cfg(test)]
+    Silent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,9 +114,9 @@ pub struct AuthState {
     /// Bumped by the auth task to have the UI thread, which owns the
     /// `Password`, empty the field.
     wipes: RwSignal<u32>,
-    /// A `pam_faillock` lock as [`crate::faillock`] sees it: a warning, never
+    /// A `pam_faillock` lock as [`crate::system::faillock`] sees it: a warning, never
     /// a gate.
-    pub locked: RwSignal<Option<String>>,
+    pub locked: RwSignal<Option<Lock>>,
     /// The last answer to a visible prompt, i.e. the user name.
     pub visible_answer: RwSignal<Option<String>>,
 }
@@ -266,8 +265,10 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let locked_w = state.locked.writer();
     // The greeter's account changes with the picker, so it has no tally.
     let tally_user = match &backend {
-        Backend::Pam { user, .. } | Backend::Polkit { user, .. } => Some(user.clone()),
+        Backend::Pam { user, .. } => Some(user.clone()),
         Backend::Greetd { .. } => None,
+        #[cfg(test)]
+        Backend::Silent => None,
     };
 
     create_effect(move || {
@@ -322,9 +323,6 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                             busy_w.set(false);
                             prompt_w.set(Some(Prompt { secret, message }));
                         }
-                        AuthEvent::Asked { secret, message } => {
-                            prompt_w.set(Some(Prompt { secret, message }));
-                        }
                         AuthEvent::Info(text) => {
                             notice_w.set(Some(Notice { level: NoticeLevel::Info, text }));
                         }
@@ -365,8 +363,8 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                     if lock_check.is_some() =>
                 {
                     let now = std::time::SystemTime::now();
-                    let lock = tally_user.as_deref().and_then(crate::faillock::status);
-                    locked_w.set(lock.map(|lock| lock.describe(now)));
+                    let lock = tally_user.as_deref().and_then(crate::system::faillock::status);
+                    locked_w.set(lock);
                     lock_check = lock
                         .and_then(|lock| lock.next_change(now))
                         .map(|wait| Instant::now() + wait);
@@ -394,7 +392,11 @@ impl Backend {
         match self {
             Backend::Pam { service, user } => pam::run(service, user, cmd_rx, event_tx).await,
             Backend::Greetd { user } => greetd::run(user, cmd_rx, event_tx).await,
-            Backend::Polkit { user, cookie } => polkit::run(user, cookie, cmd_rx, event_tx).await,
+            #[cfg(test)]
+            Backend::Silent => {
+                let _ = (cmd_rx, event_tx);
+                std::future::pending().await
+            }
         }
     }
 }

@@ -19,20 +19,7 @@ pub enum Lock {
 }
 
 impl Lock {
-    pub fn describe(self, now: SystemTime) -> String {
-        match self {
-            Lock::Until(until) => {
-                let left = until.duration_since(now).unwrap_or_default().as_secs();
-                match left.div_ceil(60) {
-                    0 | 1 => "Too many attempts — locked for another minute".to_owned(),
-                    minutes => format!("Too many attempts — locked for {minutes} more minutes"),
-                }
-            }
-            Lock::UntilReset => "Too many attempts — the account is locked".to_owned(),
-        }
-    }
-
-    /// When the text from [`describe`](Self::describe) next changes.
+    /// When to read the tally again: on each minute of the lock, and as it ends.
     pub fn next_change(self, now: SystemTime) -> Option<Duration> {
         let Lock::Until(until) = self else {
             return None;
@@ -200,18 +187,12 @@ mod tests {
     }
 
     #[test]
-    fn counts_down_in_whole_minutes() {
+    fn is_read_again_on_the_minute_and_at_the_end() {
         let now = UNIX_EPOCH + Duration::from_secs(1000);
         let lock = Lock::Until(now + Duration::from_secs(250));
-        assert_eq!(
-            lock.describe(now),
-            "Too many attempts — locked for 5 more minutes"
-        );
         assert_eq!(lock.next_change(now), Some(Duration::from_millis(10_050)));
-        let lock = Lock::Until(now + Duration::from_secs(30));
-        assert_eq!(
-            lock.describe(now),
-            "Too many attempts — locked for another minute"
-        );
+        let lock = Lock::Until(now + Duration::from_secs(60));
+        assert_eq!(lock.next_change(now), Some(Duration::from_millis(60_050)));
+        assert_eq!(Lock::UntilReset.next_change(now), None);
     }
 }

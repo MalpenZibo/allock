@@ -28,7 +28,7 @@ name = "allock"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytes",
+ "ashell-services",
  "chrono",
  "clap",
  "env_logger",
@@ -36,10 +36,10 @@ dependencies = [
  "greetd_ipc",
  "guido",
  "hex_color",
+ "image",
  "libc",
  "log",
  "pam-client2",
- "pin-project-lite",
  "serde",
  "serde_json",
  "tokio",
@@ -135,6 +135,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bb44936d800fea8f016d7f2311c6a4f97aebd5dc86f09906139ec848cf3a46f"
 dependencies = [
  "libloading",
+]
+
+[[package]]
+name = "ashell-services"
+version = "0.11.0"
+source = "git+https://github.com/MalpenZibo/ashell?branch=refactor%2Fupower-ashell-services#7411dba3f879edd9a428057b1165611e34acaf34"
+dependencies = [
+ "anyhow",
+ "futures",
+ "log",
+ "pin-project-lite",
+ "tokio",
+ "zbus",
 ]
 
 [[package]]
@@ -669,6 +682,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 
 [[package]]
+name = "float_next_after"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bf7cc16383c4b8d58b9905a8509f02926ce3058053c056376248d958c9df1e8"
+
+[[package]]
 name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -935,9 +954,8 @@ dependencies = [
 
 [[package]]
 name = "guido"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de0445f340543f762c3c0414b87055cb6da1a5b356872da90b19ceada676569d"
+version = "0.12.0"
+source = "git+https://github.com/MalpenZibo/guido?branch=main#1f376471269fb33c45828664ed349cdd8534f3c7"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
@@ -948,6 +966,7 @@ dependencies = [
  "image",
  "libc",
  "log",
+ "lyon_tessellation",
  "pollster",
  "raw-window-handle",
  "resvg",
@@ -955,6 +974,7 @@ dependencies = [
  "smallvec",
  "smithay-client-toolkit",
  "tokio",
+ "unicode-segmentation",
  "wayland-backend",
  "wayland-protocols",
  "wgpu",
@@ -963,9 +983,8 @@ dependencies = [
 
 [[package]]
 name = "guido-macros"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "715794b66501c811130ee0b1829ad0578bcf2a61860a8ddcb8608233400608d4"
+version = "0.12.0"
+source = "git+https://github.com/MalpenZibo/guido?branch=main#1f376471269fb33c45828664ed349cdd8534f3c7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1301,6 +1320,38 @@ name = "lru"
 version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+
+[[package]]
+name = "lyon_geom"
+version = "1.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4336502e29e32af93cf2dad2214ed6003c17ceb5bd499df77b1de663b9042b92"
+dependencies = [
+ "arrayvec",
+ "euclid",
+ "num-traits",
+]
+
+[[package]]
+name = "lyon_path"
+version = "1.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c463f9c428b7fc5ec885dcd39ce4aa61e29111d0e33483f6f98c74e89d8621e"
+dependencies = [
+ "lyon_geom",
+ "num-traits",
+]
+
+[[package]]
+name = "lyon_tessellation"
+version = "1.0.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43b8dcf906637ecef61b3c0740c7a4e7f27caeb31257cfac0cc579ce15be6005"
+dependencies = [
+ "float_next_after",
+ "lyon_path",
+ "num-traits",
+]
 
 [[package]]
 name = "memchr"

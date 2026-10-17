@@ -5,11 +5,8 @@
 ```sh
 scripts/install.sh             # lock screen (the default)
 scripts/install.sh --greeter   # greeter
-scripts/install.sh --polkit    # polkit agent
-scripts/install.sh --all       # all three
+scripts/install.sh --all       # both
 ```
-
-Modes combine: `scripts/install.sh --lock --polkit`.
 
 Run it as your own user, it asks for sudo when it needs root. It never edits
 greetd's config or yours.
@@ -22,7 +19,6 @@ greetd's config or yours.
 | `/etc/greetd/allock-niri.kdl`, the niri that hosts the greeter | greeter |
 | `/usr/local/share/allock/greeter-wallpaper.*` | greeter |
 | `/var/cache/allock/`, the last user and session | greeter |
-| `/usr/local/lib/systemd/user/allock-polkit.service`, not enabled | polkit agent |
 
 The greeter runs as the `greeter` user and cannot read your home, so the script
 copies what it needs: the `[appearance]` table of your allock config, and the
