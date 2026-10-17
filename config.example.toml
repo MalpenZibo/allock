@@ -49,8 +49,9 @@ size = 30.0   # diameter, logical pixels
 top = 6.0     # from the top edge, logical pixels
 
 # Before locking, ask the bar to fold its island into the seed, over
-# org.ashell.Island1. Without a bar allock locks at once; a bar that does not
-# answer within timeout_ms is not waited for.
+# org.ashell.Island1 (docs/HANDOFF.md). Without a bar allock locks at once and
+# the island arrives and leaves by itself; a bar that does not answer within
+# timeout_ms is not waited for.
 [handoff]
 enabled = true
 timeout_ms = 600

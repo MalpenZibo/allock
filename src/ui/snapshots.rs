@@ -93,6 +93,14 @@ impl Scene {
         let flow = Flow::start(auth, super::flow::FOLD_MS, || {});
         let mut screen = crate::screen(config, mode, auth, flow);
         screen.snapshots = snapshots;
+        // As with ashell on the bus: the seed is handed over both ways.
+        if mode == Mode::Lock && std::env::var_os("ALLOCK_SNAPSHOT_ALONE").is_none() {
+            let bar = create_signal(true).read_only();
+            screen.handover = super::Handover {
+                arrives: bar,
+                leaves: bar,
+            };
+        }
         screen.battery = create_signal(Some(crate::services::battery::Battery {
             percent: 59,
             charging: false,
@@ -261,6 +269,20 @@ fn snapshots() {
     over.save("snapshot-1-card");
 
     drop(over);
+
+    // Alone, with no bar to take the seed: the island pops out of nothing.
+    // SAFETY: the test runs on one thread and nothing else reads the variable.
+    unsafe { std::env::set_var("ALLOCK_SNAPSHOT_ALONE", "1") };
+    let mut alone = Scene::new(Mode::Lock).unwrap();
+    unsafe { std::env::remove_var("ALLOCK_SNAPSHOT_ALONE") };
+    alone.save("alone-0-seed");
+    alone.screen.flow.grow();
+    alone.run_real(Duration::from_millis(450));
+    alone.save("alone-1-arriving");
+    alone.run_real(Duration::from_millis(900));
+    alone.save("alone-2-card");
+    drop(alone);
+
     let mut greeter = Scene::new(Mode::Greeter).unwrap();
     greeter.settle(Phase::Rest);
     greeter.save("greeter-1-rest");

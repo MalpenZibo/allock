@@ -133,8 +133,11 @@ handing back. The pictures stay in memory and are never written anywhere; an
 output that cannot be captured, or a compositor that takes longer than half a
 second, gets the wallpaper.
 
-The handoff is optional: without a bar allock locks at once, and a bar that
-does not answer within `[handoff] timeout_ms` is not waited for. Nothing but
+The handoff is optional: without a bar allock locks at once, and the island
+pops out of nothing and shrinks away at the end instead of starting and ending
+as a lone dot. A bar that does not answer within `[handoff] timeout_ms` is not
+waited for. [docs/HANDOFF.md](docs/HANDOFF.md) has the interface a bar
+implements. Nothing but
 "fold" and "resume" goes over it. The greeter does the same on its side of the
 compositor switch: it folds into the seed over the wallpaper, sharpened, which
 is the picture the session starts on.

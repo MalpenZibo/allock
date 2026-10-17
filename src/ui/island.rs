@@ -160,9 +160,28 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
         Translate::new(0.0, y)
     };
 
+    // With nobody to hand the seed to, or from, it is not left on screen as a
+    // dot: the island pops out of it, and shrinks away into it.
+    let handover = screen.handover;
+    let shown = move || match flow.phase.get() {
+        Phase::Seed => handover.arrives.get(),
+        Phase::Gone => handover.leaves.get(),
+        Phase::Rest | Phase::Awake | Phase::Ok => true,
+    };
     container()
         .align_self(Alignment::TOP_CENTER)
         .translate(top.transition(springy()))
+        .opacity((move || if shown() { 1.0 } else { 0.0 }).transition(motion::color()))
+        .scale(
+            (move || {
+                if shown() {
+                    Scale::NONE
+                } else {
+                    Scale::uniform(0.1)
+                }
+            })
+            .transition(springy()),
+        )
         .child(shape)
 }
 

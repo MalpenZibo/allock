@@ -144,6 +144,7 @@ fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
         now: clock::now(),
         host: system::hostname().into(),
         snapshots: Snapshots::default(),
+        handover: ui::Handover::none(),
         user: create_signal(None),
         users: Rc::new(Vec::new()),
         user_choice: create_signal(0),
@@ -207,8 +208,15 @@ fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
         }
     });
 
-    let screen = screen(config, mode, auth, flow);
+    let mut screen = screen(config, mode, auth, flow);
     screen.user.set(Some(me));
+    if let Some(handoff) = handoff {
+        // ashell takes the seed back only if it is there to.
+        screen.handover = ui::Handover {
+            arrives: handoff.bar,
+            leaves: handoff.bar,
+        };
+    }
 
     match handoff {
         None => {
@@ -407,6 +415,12 @@ fn run_greeter(config: Rc<Config>) {
     let flow = Flow::start(auth, SHARPEN_MS, start_session);
 
     let mut screen = screen(config, Mode::Greeter, auth, flow);
+    // The session's bar starts as the seed, on the far side of greetd's
+    // compositor switch; there is none before the greeter.
+    screen.handover = ui::Handover {
+        arrives: create_signal(false).read_only(),
+        leaves: create_signal(true).read_only(),
+    };
     screen.users = users.clone();
     screen.user_choice = user_index;
     screen.sessions = sessions;
