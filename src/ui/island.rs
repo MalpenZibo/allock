@@ -21,7 +21,7 @@ enum View {
 const AWAKE_ABOVE_MIDDLE: f32 = 140.0;
 /// Up to this height the island is a pill; past it, a card with these corners.
 const PILL_HEIGHT: f32 = 44.0;
-const CARD_CORNERS: f32 = 30.0;
+const CARD_CORNERS: f32 = 44.0;
 /// Width grows first and height follows; shrinking, height goes first.
 const HEIGHT_LAG_MS: f32 = 45.0;
 const WIDTH_LAG_MS: f32 = 55.0;
@@ -111,10 +111,13 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
         .corners(
             (move || {
                 let (w, h) = size.get();
+                // A pill and the seed are capsules, and the seed has to be
+                // the circle the bar draws; the card has continuous corners.
+                // The curvature eases between the two with the radius.
                 if h <= PILL_HEIGHT {
-                    w.min(h) / 2.0
+                    Corners::rounded(w.min(h) / 2.0)
                 } else {
-                    CARD_CORNERS
+                    Corners::squircle(CARD_CORNERS)
                 }
             })
             .transition(springy()),
