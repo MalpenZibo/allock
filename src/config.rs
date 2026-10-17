@@ -267,14 +267,23 @@ impl Default for GreeterConfig {
 #[serde(default)]
 pub struct Appearance {
     pub font_name: Option<String>,
+    // Each colour also reads the `{ base = .., weak = .. }` tables of earlier
+    // configs, keeping the base.
     /// The island, and the seed it starts and ends as.
+    #[serde(deserialize_with = "base_color")]
     pub island_color: HexColor,
     /// Behind the wallpaper, and instead of it when there is none.
+    #[serde(deserialize_with = "base_color")]
     pub background_color: HexColor,
+    #[serde(deserialize_with = "base_color")]
     pub text_color: HexColor,
+    #[serde(deserialize_with = "base_color")]
     pub primary_color: HexColor,
+    #[serde(deserialize_with = "base_color")]
     pub success_color: HexColor,
+    #[serde(deserialize_with = "base_color")]
     pub warning_color: HexColor,
+    #[serde(deserialize_with = "base_color")]
     pub danger_color: HexColor,
 }
 
@@ -291,6 +300,18 @@ impl Default for Appearance {
             danger_color: HexColor::rgb(243, 139, 168),
         }
     }
+}
+
+fn base_color<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<HexColor, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        Plain(HexColor),
+        Table { base: HexColor },
+    }
+    Ok(match Either::deserialize(deserializer)? {
+        Either::Plain(color) | Either::Table { base: color } => color,
+    })
 }
 
 pub fn color(c: HexColor) -> Color {
@@ -519,6 +540,18 @@ mod tests {
         assert_eq!(
             config.appearance.text_color,
             Appearance::default().text_color
+        );
+    }
+
+    #[test]
+    fn a_colour_table_from_an_earlier_config_keeps_its_base() {
+        let config: Config = toml::from_str(
+            "[appearance]\ndanger_color = { base = \"#333333\", weak = \"#000000\" }",
+        )
+        .unwrap();
+        assert_eq!(
+            color(config.appearance.danger_color),
+            Color::rgb(0.2, 0.2, 0.2)
         );
     }
 
