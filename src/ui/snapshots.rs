@@ -255,6 +255,9 @@ fn snapshots() {
     .unwrap();
     over.save("snapshot-0-seed");
     over.screen.flow.grow();
+    // The seed opening into the card: the card at its own size, uncovered.
+    over.run_real(Duration::from_millis(480));
+    over.save("snapshot-0b-growing");
     over.run(Duration::from_millis(1800));
     over.save("snapshot-1-card");
 

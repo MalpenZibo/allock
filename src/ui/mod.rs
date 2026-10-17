@@ -18,7 +18,6 @@ use std::rc::Rc;
 
 use chrono::{DateTime, Local};
 use guido::prelude::*;
-use guido::widget_prelude::*;
 
 use crate::Mode;
 use crate::config::{Config, SessionDef};
@@ -134,29 +133,4 @@ fn attach_keys(root: Container, screen: &Screen) -> Container {
         }
         EventResponse::Handled
     })
-}
-
-/// Lays its children out at their own size, whatever its own, centred
-/// across and at the top: the island's shape springs to the size of what it
-/// shows, and what it shows is never squeezed while it does.
-struct Overhang;
-
-impl Layout for Overhang {
-    fn layout(
-        &mut self,
-        ctx: &mut LayoutCtx,
-        children: &[WidgetId],
-        constraints: Constraints,
-        origin: (f32, f32),
-    ) -> Size {
-        let size = constraints.constrain(Size::new(0.0, 0.0));
-        let free = Constraints::new(0.0, 0.0, f32::INFINITY, f32::INFINITY);
-        for &child in children {
-            let laid = ctx.layout_child(child, free).unwrap_or_default();
-            let x = origin.0 + (size.width - laid.width) / 2.0;
-            ctx.tree().set_origin(child, x, origin.1);
-        }
-        ctx.set_minimum(Size::new(0.0, 0.0));
-        size
-    }
 }

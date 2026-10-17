@@ -4,7 +4,7 @@
 use guido::prelude::*;
 
 use super::flow::Phase;
-use super::{Overhang, Screen, card, rest};
+use super::{Screen, card, rest};
 use crate::services::auth::NoticeLevel;
 use ashell_ui::motion::{self, arriving, shake};
 
@@ -125,7 +125,7 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
         .background(theme.colors.island)
         .shadow(shadows.transition(400.0))
         .overflow(Overflow::Hidden)
-        .layout(Overhang)
+        .layout(ZStack::new().align(Alignment::TOP_CENTER))
         // Played by the refusal count, so every refusal shakes it again.
         .translate(Translate::NONE.timeline(shake().played_by(state.rejections)))
         .child({
@@ -140,7 +140,12 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
                     View::Card => card::view(&screen),
                     View::Ok => ok(&screen),
                 };
-                arriving(content).widget_ref(view)
+                // At its own size whatever the shape's is: the shape springs
+                // around it and clips it, and nothing inside re-wraps.
+                arriving(content)
+                    .width(natural())
+                    .height(natural())
+                    .widget_ref(view)
             }
         });
 
