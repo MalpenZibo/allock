@@ -162,6 +162,15 @@ impl Scene {
         }
     }
 
+    /// Frames at 60 Hz in step with the wall clock, for what runs on timers.
+    fn run_real(&mut self, span: Duration) {
+        for _ in 0..span.as_millis() / 16 {
+            std::thread::sleep(Duration::from_millis(16));
+            self.clock += Duration::from_millis(16);
+            self.app.step_at(self.clock);
+        }
+    }
+
     fn settle(&mut self, phase: Phase) {
         self.screen.flow.phase.set(phase);
         self.run(Duration::from_millis(1600));
@@ -201,14 +210,28 @@ fn snapshots() {
         level: NoticeLevel::Error,
         text: "Wrong password".to_owned(),
     }));
+    state.tally.set(Some(crate::system::faillock::Tally {
+        failed: 2,
+        deny: 3,
+        lockout: Some(Duration::from_secs(600)),
+    }));
+    lock.screen.flow.caps_at_refusal.set(true);
     lock.run(Duration::from_millis(800));
     lock.save("lock-4-refused");
+    state.password.set(Secret::from("h".to_owned()));
+    lock.run(Duration::from_millis(400));
+    lock.save("lock-4b-last-try");
+    state.password.clear();
+    lock.screen.flow.caps_at_refusal.set(false);
     lock.screen.flow.zone.set(Some(super::flow::Zone::Power));
     lock.run(Duration::from_millis(800));
     lock.save("lock-5-power");
     // The flow's own timers run on the wall clock: the tick shows for 600 ms.
+    // The tick is drawn on the wall clock: 150 ms of wait, then 500 of pen.
     state.authenticated.set(true);
-    lock.run(Duration::from_millis(400));
+    lock.run_real(Duration::from_millis(250));
+    lock.save("lock-6-ok-drawing");
+    lock.run_real(Duration::from_millis(330));
     lock.save("lock-6-ok");
 
     // One application at a time: two on one thread share guido's globals.

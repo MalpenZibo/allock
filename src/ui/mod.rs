@@ -12,6 +12,7 @@ mod rest;
 #[cfg(test)]
 mod snapshots;
 pub mod theme;
+mod tick;
 
 use std::rc::Rc;
 

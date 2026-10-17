@@ -294,10 +294,57 @@ fn users(screen: &Screen, armed: Signal<bool>) -> Container {
 }
 
 /// One line under the field: checking, a lockout, a refusal, or the reader.
+#[derive(Debug, Clone, PartialEq)]
+enum Line {
+    Checking,
+    Locked,
+    /// Just refused: why, and how many tries are used.
+    Refused {
+        text: String,
+        caps: bool,
+    },
+    /// The next refusal locks the account.
+    LastTry(Option<std::time::Duration>),
+    Notice(String),
+    Reader(FingerprintState),
+}
+
 fn message(screen: &Screen) -> Container {
     let theme = screen.theme;
     let state = screen.auth.state;
+    let flow = screen.flow;
     let screen = screen.clone();
+
+    // Rebuilt when what is said changes, not on every key.
+    let said = create_memo(move || {
+        if state.busy.get() {
+            return Some(Line::Checking);
+        }
+        if state.locked.get().is_some() {
+            return Some(Line::Locked);
+        }
+        let tally = state.tally.get();
+        match state.notice.get().filter(|n| !n.text.is_empty()) {
+            // A refusal is said until the next answer is being typed.
+            Some(notice) if notice.level == NoticeLevel::Error && state.field_is_empty() => {
+                return Some(Line::Refused {
+                    text: notice.text,
+                    caps: flow.caps_at_refusal.get(),
+                });
+            }
+            Some(notice) if notice.level == NoticeLevel::Info => {
+                return Some(Line::Notice(notice.text));
+            }
+            _ => {}
+        }
+        if let Some(tally) = tally.filter(|t| t.failed > 0 && t.left() == 1) {
+            return Some(Line::LastTry(tally.lockout));
+        }
+        match state.fingerprint.get() {
+            FingerprintState::Unavailable | FingerprintState::Resting => None,
+            reader => Some(Line::Reader(reader)),
+        }
+    });
 
     container()
         .height(18.0)
@@ -313,36 +360,90 @@ fn message(screen: &Screen) -> Container {
                     .child(icon_kind.map(|kind| icon(kind, 14.0, color)))
                     .child(text(words).font_size(12.0).color(color).nowrap())
             };
-            let notice = state.notice.get().filter(|n| !n.text.is_empty());
-            if state.busy.get() {
-                return Some(line(None, "Checking…".to_owned(), theme.colors.dim));
-            }
-            if state.locked.get().is_some() {
-                return Some(lockout_chip(&screen, true));
-            }
-            if let Some(notice) = notice {
-                let color = match notice.level {
-                    NoticeLevel::Error => theme.colors.danger,
-                    NoticeLevel::Info => theme.colors.dim,
-                };
-                return Some(line(None, notice.text, color));
-            }
-            let (words, color) = match state.fingerprint.get() {
-                FingerprintState::Waiting => (
-                    "Or touch the fingerprint sensor".to_owned(),
-                    theme.colors.dim,
-                ),
-                FingerprintState::Reading => {
-                    ("Checking your fingerprint…".to_owned(), theme.colors.accent)
+            Some(match said.get()? {
+                Line::Checking => line(None, "Checking…".to_owned(), theme.colors.dim),
+                Line::Locked => lockout_chip(&screen, true),
+                Line::Refused { text, caps } => {
+                    let words = if caps {
+                        format!("{text} — Caps Lock is on")
+                    } else {
+                        text
+                    };
+                    line(None, words, theme.colors.danger)
+                        .layout(
+                            Flex::row()
+                                .spacing(8.0)
+                                .cross_alignment(CrossAlignment::Center),
+                        )
+                        .child(attempts(&screen))
                 }
-                FingerprintState::Retry(hint) => (hint, theme.colors.warning),
-                FingerprintState::Exhausted => (
-                    "Too many fingerprint attempts — use your password".to_owned(),
-                    theme.colors.dim,
-                ),
-                FingerprintState::Unavailable | FingerprintState::Resting => return None,
+                Line::LastTry(lockout) => {
+                    let then = match lockout {
+                        Some(lockout) => {
+                            format!("then a {}-minute lockout", lockout.as_secs().div_ceil(60))
+                        }
+                        None => "then the account locks".to_owned(),
+                    };
+                    line(
+                        None,
+                        format!("1 attempt left, {then}"),
+                        theme.colors.warning,
+                    )
+                }
+                Line::Notice(text) => line(None, text, theme.colors.dim),
+                Line::Reader(reader) => {
+                    let (words, color) = match reader {
+                        FingerprintState::Waiting => (
+                            "Or touch the fingerprint sensor".to_owned(),
+                            theme.colors.dim,
+                        ),
+                        FingerprintState::Reading => {
+                            ("Checking your fingerprint…".to_owned(), theme.colors.accent)
+                        }
+                        FingerprintState::Retry(hint) => (hint, theme.colors.warning),
+                        _ => (
+                            "Too many fingerprint attempts — use your password".to_owned(),
+                            theme.colors.dim,
+                        ),
+                    };
+                    line(Some(Icon::Fingerprint), words, color)
+                }
+            })
+        })
+}
+
+/// A dot per attempt `pam_faillock` allows, the used ones red.
+fn attempts(screen: &Screen) -> Container {
+    let theme = screen.theme;
+    let tally = screen.auth.state.tally;
+    container()
+        .layout(Flex::row().spacing(4.0))
+        .children(move || {
+            let Some(tally) = tally.get() else {
+                return Vec::new();
             };
-            Some(line(Some(Icon::Fingerprint), words, color))
+            (0..tally.deny)
+                .map(|n| {
+                    let used = n < tally.failed;
+                    container()
+                        .width(6.0)
+                        .height(6.0)
+                        .corners(3.0)
+                        .background(if used {
+                            theme.colors.danger
+                        } else {
+                            Color::WHITE.with_alpha(0.18)
+                        })
+                        // The one just used fills in.
+                        .scale(Scale::NONE.transition(motion::spring()).entering_from(
+                            Scale::uniform(if used && n + 1 == tally.failed {
+                                0.2
+                            } else {
+                                1.0
+                            }),
+                        ))
+                })
+                .collect::<Vec<_>>()
         })
 }
 

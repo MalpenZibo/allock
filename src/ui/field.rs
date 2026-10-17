@@ -209,6 +209,7 @@ fn go(screen: &Screen) -> Container {
         })
         .transition(200.0),
     )
+    .when_hovered(|s| s.lighter(0.08))
     .on_click(move || auth.submit())
     .child(move || {
         if state.busy.get() {

@@ -25,6 +25,12 @@ const SHARP: Look = Look {
 };
 
 const EASE_MS: f32 = 1100.0;
+/// The island's spring slowed to the same 1.1 s: as bouncy, as long as the blur.
+const ZOOM_SPRING: SpringConfig = SpringConfig {
+    mass: 1.0,
+    stiffness: 76.0,
+    damping: 12.1,
+};
 const FADE_IN_MS: f32 = 400.0;
 /// Resting adds this much blur, and darkens to this.
 const REST_BLUR: f32 = 8.0;
@@ -99,7 +105,10 @@ pub fn view(screen: &Screen, output: &OutputInfo) -> Option<Container> {
                     .height(fill())
                     .layout(Flex::column().center())
                     .blur((move || look.get().blur).transition(ease()))
-                    .scale((move || Scale::uniform(look.get().scale)).transition(ease()))
+                    .scale(
+                        (move || Scale::uniform(look.get().scale))
+                            .transition(Transition::spring(ZOOM_SPRING)),
+                    )
                     .child(picture),
             )
             .child(

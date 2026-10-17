@@ -11,7 +11,7 @@ pub mod pam;
 
 use guido::prelude::*;
 
-pub use crate::system::faillock::Lock;
+pub use crate::system::faillock::{Lock, Tally};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -117,6 +117,9 @@ pub struct AuthState {
     /// A `pam_faillock` lock as [`crate::system::faillock`] sees it: a warning, never
     /// a gate.
     pub locked: RwSignal<Option<Lock>>,
+    /// The attempts `pam_faillock` allows, and how many are used. `None`
+    /// in the greeter and where the tally cannot be read.
+    pub tally: RwSignal<Option<Tally>>,
     /// The last answer to a visible prompt, i.e. the user name.
     pub visible_answer: RwSignal<Option<String>>,
 }
@@ -135,6 +138,7 @@ impl AuthState {
             password: create_password(),
             wipes: create_signal(0),
             locked: create_signal(None),
+            tally: create_signal(None),
             visible_answer: create_signal(None),
         }
     }
@@ -263,6 +267,7 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let fingerprint_w = state.fingerprint.writer();
     let wipes_w = state.wipes.writer();
     let locked_w = state.locked.writer();
+    let tally_w = state.tally.writer();
     // The greeter's account changes with the picker, so it has no tally.
     let tally_user = match &backend {
         Backend::Pam { user, .. } => Some(user.clone()),
@@ -363,8 +368,12 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                     if lock_check.is_some() =>
                 {
                     let now = std::time::SystemTime::now();
-                    let lock = tally_user.as_deref().and_then(crate::system::faillock::status);
+                    let (lock, tally) = tally_user
+                        .as_deref()
+                        .map(crate::system::faillock::status)
+                        .unwrap_or_default();
                     locked_w.set(lock);
+                    tally_w.set(tally);
                     lock_check = lock
                         .and_then(|lock| lock.next_change(now))
                         .map(|wait| Instant::now() + wait);

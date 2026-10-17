@@ -6,8 +6,6 @@ use guido::prelude::*;
 use super::flow::Phase;
 use super::{Overhang, Screen, card, rest};
 use crate::services::auth::NoticeLevel;
-use ashell_ui::Icon;
-use ashell_ui::icons::weighted;
 use ashell_ui::motion::{self, arriving, shake};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,11 +167,9 @@ fn ok(screen: &Screen) -> Container {
         .width(76.0)
         .height(76.0)
         .layout(Flex::column().center())
-        .child(
-            weighted(Icon::Check, 34.0, 3.0, screen.theme.colors.success).scale(
-                Scale::NONE
-                    .transition(Transition::spring(SpringConfig::BOUNCY))
-                    .entering_from(Scale::uniform(0.4)),
-            ),
-        )
+        .child(super::tick::tick(
+            34.0,
+            3.0 * 34.0 / 24.0,
+            screen.theme.colors.success,
+        ))
 }

@@ -106,13 +106,62 @@ fn lock(options: &Options, failures: &[u64], now: u64) -> Option<Lock> {
     (until >= now).then(|| Lock::Until(UNIX_EPOCH + Duration::from_secs(until)))
 }
 
-pub fn status(user: &str) -> Option<Lock> {
+/// How many of the attempts `pam_faillock` allows have been used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tally {
+    /// Failures still inside `fail_interval`.
+    pub failed: u32,
+    /// How many lock the account.
+    pub deny: u32,
+    /// How long that lock lasts; `None` until an administrator resets it.
+    pub lockout: Option<Duration>,
+}
+
+impl Tally {
+    pub fn left(&self) -> u32 {
+        self.deny.saturating_sub(self.failed)
+    }
+}
+
+/// Mirrors pam_faillock's window: a failure older than `fail_interval` no
+/// longer counts towards a lock.
+fn tally(options: &Options, failures: &[u64], now: u64) -> Option<Tally> {
+    if options.deny == 0 {
+        return None;
+    }
+    let failed = failures
+        .iter()
+        .filter(|&&time| now.saturating_sub(time) < options.fail_interval)
+        .count();
+    Some(Tally {
+        failed: u32::try_from(failed).unwrap_or(u32::MAX),
+        deny: options.deny,
+        lockout: (options.unlock_time > 0).then(|| Duration::from_secs(options.unlock_time)),
+    })
+}
+
+/// The lock, and the attempts used towards one. No tally file yet is no
+/// failure yet.
+pub fn status(user: &str) -> (Option<Lock>, Option<Tally>) {
     let options = std::fs::read_to_string(CONFIG)
         .map(|config| parse_options(&config))
         .unwrap_or_default();
-    let tally = std::fs::read(Path::new(&options.dir).join(user)).ok()?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    lock(&options, &failures(&tally), now)
+    let Ok(now) = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|now| now.as_secs())
+    else {
+        return (None, None);
+    };
+    let failures = match std::fs::read(Path::new(&options.dir).join(user)) {
+        Ok(record) => failures(&record),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        // Unreadable: say nothing rather than a count that may be wrong.
+        Err(_) => return (None, None),
+    };
+    (
+        lock(&options, &failures, now),
+        tally(&options, &failures, now),
+    )
 }
 
 #[cfg(test)]
@@ -125,6 +174,20 @@ mod tests {
         record[54..56].copy_from_slice(&status.to_ne_bytes());
         record[56..64].copy_from_slice(&time.to_ne_bytes());
         record
+    }
+
+    #[test]
+    fn counts_the_failures_inside_the_interval() {
+        let options = Options::default();
+        let now = 10_000;
+        let tally = tally(&options, &[now - 1000, now - 100, now - 10], now).unwrap();
+        assert_eq!((tally.failed, tally.deny, tally.left()), (2, 3, 1));
+        assert_eq!(tally.lockout, Some(Duration::from_secs(600)));
+        let unlimited = Options {
+            deny: 0,
+            ..Options::default()
+        };
+        assert_eq!(super::tally(&unlimited, &[now], now), None);
     }
 
     #[test]

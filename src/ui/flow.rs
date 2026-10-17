@@ -55,6 +55,9 @@ pub struct Flow {
     pub zone: RwSignal<Option<Zone>>,
     /// Show the password in the clear.
     pub reveal: RwSignal<bool>,
+    /// Caps lock was on when the last answer was refused: the likeliest
+    /// reason, and worth saying.
+    pub caps_at_refusal: RwSignal<bool>,
 }
 
 impl Flow {
@@ -65,7 +68,14 @@ impl Flow {
             phase: create_signal(Phase::Seed),
             zone: create_signal(None),
             reveal: create_signal(false),
+            caps_at_refusal: create_signal(false),
         };
+        create_effect(move || {
+            if auth.state.rejections.get() > 0 {
+                let caps = keyboard_modifiers().get_untracked().caps_lock;
+                flow.caps_at_refusal.set(caps);
+            }
+        });
         let phase = flow.phase;
 
         create_effect(move || {
