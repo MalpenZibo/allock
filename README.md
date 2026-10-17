@@ -30,7 +30,8 @@
 - A handoff with [ashell](https://github.com/MalpenZibo/ashell): the bar folds
   its island into the same dot before the lock appears, and grows back out of
   it after the unlock
-- Blurred wallpaper, a rolling clock, battery ring, suspend, reboot and shut down
+- Blurred wallpaper, or a snapshot of the session that blurs as the lock
+  starts and sharpens as it ends, a rolling clock, battery ring, suspend, reboot and shut down
 - Multi-monitor: choose which monitors show the controls
 - Remembers the last user and session in the greeter
 - Preview mode to try a theme without locking
@@ -122,6 +123,14 @@ the seed in its first frame, and grows it. Unlocking does the reverse: the card
 folds into the seed, the session comes back with the bar still a seed, and
 `ResumeAfterHandoff()` lets it grow. logind's `LockedHint` is kept too, so a bar
 restarted mid-lock knows to wait as the seed.
+
+The background is the only thing the compositor still cuts. With
+`[background] source = "Snapshot"` not even that: once the bar is the seed,
+allock takes a picture of every output through `wlr-screencopy`, starts the
+lock on it sharp and blurs it, and sharpens it again under the seed before
+handing back. The pictures stay in memory and are never written anywhere; an
+output that cannot be captured, or a compositor that takes longer than half a
+second, gets the wallpaper.
 
 The handoff is optional: without a bar allock locks at once, and a bar that
 does not answer within `[handoff] timeout_ms` is not waited for. Nothing but

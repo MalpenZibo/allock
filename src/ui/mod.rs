@@ -26,9 +26,12 @@ use crate::config::{Config, SessionDef};
 use crate::services::auth::Auth;
 use crate::services::battery::Battery;
 use crate::services::power::Power;
+use crate::services::snapshot::Snapshot;
 use crate::system::user::UserInfo;
 use flow::{Flow, Phase};
 use theme::Theme;
+
+pub type Snapshots = std::sync::Arc<std::collections::HashMap<String, Snapshot>>;
 
 /// Everything a screen reads. Cheap to clone.
 #[derive(Clone)]
@@ -42,6 +45,9 @@ pub struct Screen {
     pub power: Power,
     pub now: Signal<DateTime<Local>>,
     pub host: Rc<str>,
+    /// The session as it was when the lock was asked for, by output name.
+    /// Empty unless the background is a snapshot.
+    pub snapshots: Snapshots,
     /// Who is signing in. Greeter: follows the picker.
     pub user: RwSignal<Option<UserInfo>>,
     /// Greeter only. "Other…" sits after these, at `users.len()`.
@@ -74,7 +80,7 @@ pub fn view(screen: Screen, output: OutputInfo) -> Container {
         .widget_ref(root_ref)
         .background(screen.theme.background)
         .layout(ZStack::new())
-        .child(background::view(&screen))
+        .child(background::view(&screen, &output))
         .child({
             let screen = screen.clone();
             move || controls.get().then(|| clock::view(&screen, height.into()))

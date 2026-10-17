@@ -94,9 +94,22 @@ pub enum BackgroundFit {
     Stretch,
 }
 
+/// What the lock is drawn over.
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BackgroundSource {
+    /// The picture at `path`.
+    #[default]
+    Wallpaper,
+    /// The session as it was when the lock was asked for, sharp at first and
+    /// then blurred, so nothing on screen jumps. The picture at `path` stands
+    /// in where the compositor cannot capture.
+    Snapshot,
+}
+
 #[derive(Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct BackgroundConfig {
+    pub source: BackgroundSource,
     /// Image behind the form, `~` expanded; unset or unreadable uses the background colour.
     pub path: Option<String>,
     pub fit: BackgroundFit,
@@ -110,6 +123,7 @@ pub struct BackgroundConfig {
 impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
+            source: BackgroundSource::default(),
             path: None,
             fit: BackgroundFit::default(),
             dim: 0.45,

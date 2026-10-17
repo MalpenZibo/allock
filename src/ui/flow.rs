@@ -35,6 +35,8 @@ const GROW_MS: u64 = 350;
 const OK_MS: u64 = 600;
 /// The fold into the seed, before the handover.
 pub const FOLD_MS: u64 = 650;
+/// The same, when the background sharpens back into what comes next as well.
+pub const SHARPEN_MS: u64 = 1100;
 /// After a card appears, the key or click that woke it cannot press a button.
 pub const ARM_MS: u64 = 450;
 
@@ -55,8 +57,8 @@ pub struct Flow {
 
 impl Flow {
     /// Starts as the seed, and folds back into it once `auth` accepts; `gone`
-    /// runs when the fold is over. [`grow`](Self::grow) says when it may grow.
-    pub fn start(auth: Auth, gone: impl Fn() + 'static) -> Self {
+    /// runs `fold_ms` later. [`grow`](Self::grow) says when it may grow.
+    pub fn start(auth: Auth, fold_ms: u64, gone: impl Fn() + 'static) -> Self {
         let flow = Self {
             phase: create_signal(Phase::Seed),
             zone: create_signal(None),
@@ -79,7 +81,7 @@ impl Flow {
         create_effect(move || {
             if phase.get() == Phase::Gone {
                 let gone = gone.clone();
-                set_timeout(Duration::from_millis(FOLD_MS), move || gone());
+                set_timeout(Duration::from_millis(fold_ms), move || gone());
             }
         });
 

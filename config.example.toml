@@ -13,6 +13,11 @@ log_level = "warn"
 main_output = "All"
 
 [background]
+# "Wallpaper", or "Snapshot": the session as it was when the lock was asked
+# for, sharp at first and then blurred, and sharp again as the unlock hands
+# back, so nothing on screen jumps. Lock screen only; the picture below
+# stands in where the compositor cannot capture (it needs wlr-screencopy).
+source = "Wallpaper"
 # A picture, or the background colour when unset. `~` and symlinks work.
 # path = "~/.config/niri-wallpaper/current"
 fit = "Cover"   # Cover | Contain | Stretch

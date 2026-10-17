@@ -7,3 +7,4 @@ pub mod clock;
 pub mod handoff;
 pub mod idle;
 pub mod power;
+pub mod snapshot;

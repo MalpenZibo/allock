@@ -14,14 +14,16 @@ use std::time::Duration;
 use clap::Parser;
 use guido::prelude::*;
 
-use crate::config::{Config, SessionDef, SessionOutput};
+use std::sync::Arc;
+
+use crate::config::{BackgroundSource, Config, SessionDef, SessionOutput};
 use crate::services::auth::{self, Auth, Backend, FingerprintConfig};
 use crate::services::handoff::Handoff;
-use crate::services::{battery, clock, idle, power::Power};
+use crate::services::{battery, clock, idle, power::Power, snapshot};
 use crate::system::{last_login, user};
-use crate::ui::Screen;
-use crate::ui::flow::{Flow, Phase};
+use crate::ui::flow::{FOLD_MS, Flow, Phase, SHARPEN_MS};
 use crate::ui::theme::Theme;
+use crate::ui::{Screen, Snapshots};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -141,6 +143,7 @@ fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
         power: Power::start(),
         now: clock::now(),
         host: system::hostname().into(),
+        snapshots: Snapshots::default(),
         user: create_signal(None),
         users: Rc::new(Vec::new()),
         user_choice: create_signal(0),
@@ -174,7 +177,10 @@ fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
     );
 
     let handoff = (mode == Mode::Lock).then(|| Handoff::start(config.handoff));
-    let flow = Flow::start(auth, move || match mode {
+    let snapshot = config.background.source == BackgroundSource::Snapshot;
+    // Over a snapshot the island folds while the session sharpens back in.
+    let fold_ms = if snapshot { SHARPEN_MS } else { FOLD_MS };
+    let flow = Flow::start(auth, fold_ms, move || match mode {
         Mode::Lock => {
             log::info!("authenticated, unlocking");
             unlock_session();
@@ -207,23 +213,73 @@ fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
     match handoff {
         None => {
             log::warn!("preview mode: the session is NOT locked");
-            // Never Exclusive: a preview must not swallow the session's keyboard.
-            spawn_fullscreen_surfaces(screen, KeyboardInteractivity::OnDemand);
-            flow.grow();
+            once_captured(snapshot, move |snapshots| {
+                let screen = Screen {
+                    snapshots,
+                    ..screen
+                };
+                // Never Exclusive: a preview must not swallow the session's keyboard.
+                spawn_fullscreen_surfaces(screen, KeyboardInteractivity::OnDemand);
+                flow.grow();
+            });
         }
         Some(handoff) => {
             handoff.prepare();
-            let locked = std::cell::Cell::new(false);
-            create_effect(move || {
-                // Once: the bar is the seed, or will not answer.
-                if handoff.ready.get() && !locked.replace(true) {
-                    let screen = screen.clone();
-                    lock_session(move |output| ui::view(screen.clone(), output));
-                }
-            });
+            let ready = handoff.ready;
+            // The bar is the seed, or will not answer: the picture taken now
+            // has the seed where the lock draws its own.
+            once(
+                move || ready.get(),
+                move || {
+                    once_captured(snapshot, move |snapshots| {
+                        let screen = Screen {
+                            snapshots,
+                            ..screen
+                        };
+                        lock_session(move |output| ui::view(screen.clone(), output));
+                    });
+                },
+            );
             watch_lock_lifecycle(handoff, flow);
         }
     }
+}
+
+/// Run `then` the first time `ready` is true.
+fn once(ready: impl Fn() -> bool + 'static, then: impl FnOnce() + 'static) {
+    let then = std::cell::Cell::new(Some(then));
+    create_effect(move || {
+        if ready()
+            && let Some(then) = then.take()
+        {
+            then();
+        }
+    });
+}
+
+/// How long the lock waits for the compositor's picture of the session.
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Run `then` with a picture of every output, or with none at once when the
+/// background is not a snapshot or the capture fails.
+fn once_captured(snapshot: bool, then: impl FnOnce(Snapshots) + 'static) {
+    if !snapshot {
+        return then(Snapshots::default());
+    }
+    let captured = create_signal(None::<Snapshots>);
+    let writer = captured.writer();
+    create_task(move |_ctx| async move {
+        let snapshots = snapshot::capture(SNAPSHOT_TIMEOUT).await;
+        writer.set(Some(Arc::new(snapshots)));
+    });
+    let then = std::cell::Cell::new(Some(then));
+    create_effect(move || {
+        if let Some(snapshots) = captured.get()
+            && let Some(then) = then.take()
+        {
+            then(snapshots);
+        }
+    });
 }
 
 /// Exit on the `Locked → Unlocked` edge only, after telling the bar it may
@@ -348,7 +404,7 @@ fn run_greeter(config: Rc<Config>) {
     };
     // The session starts once the island has folded and the wallpaper is sharp,
     // the picture the session opens on.
-    let flow = Flow::start(auth, start_session);
+    let flow = Flow::start(auth, SHARPEN_MS, start_session);
 
     let mut screen = screen(config, Mode::Greeter, auth, flow);
     screen.users = users.clone();

@@ -75,6 +75,11 @@ struct Scene {
 
 impl Scene {
     fn new(mode: Mode) -> Option<Self> {
+        Self::with(mode, Default::default())
+    }
+
+    /// With the session's picture of each output, as the lock takes it.
+    fn with(mode: Mode, snapshots: super::Snapshots) -> Option<Self> {
         let mut app = Headless::new()?;
         let output = app.connect_output("eDP-1");
 
@@ -85,8 +90,9 @@ impl Scene {
         let config = Rc::new(config);
 
         let auth = auth::start(Backend::Silent, None);
-        let flow = Flow::start(auth, || {});
+        let flow = Flow::start(auth, super::flow::FOLD_MS, || {});
         let mut screen = crate::screen(config, mode, auth, flow);
+        screen.snapshots = snapshots;
         screen.battery = create_signal(Some(crate::services::battery::Battery {
             percent: 59,
             charging: false,
@@ -202,6 +208,27 @@ fn snapshots() {
     state.authenticated.set(true);
     lock.run(Duration::from_millis(400));
     lock.save("lock-6-ok");
+
+    // The session's own picture stands in for the snapshot: sharp on the
+    // seed, blurred once the island grows.
+    let desk = ::image::open(wallpaper())
+        .unwrap()
+        .resize_exact(WIDTH, HEIGHT, ::image::imageops::FilterType::Triangle)
+        .into_rgba8();
+    let snapshot = crate::services::snapshot::Snapshot {
+        width: WIDTH,
+        height: HEIGHT,
+        pixels: desk.into_raw().into(),
+    };
+    let mut over = Scene::with(
+        Mode::Lock,
+        std::sync::Arc::new([("eDP-1".to_owned(), snapshot)].into()),
+    )
+    .unwrap();
+    over.save("snapshot-0-seed");
+    over.screen.flow.grow();
+    over.run(Duration::from_millis(1800));
+    over.save("snapshot-1-rest");
 
     let mut greeter = Scene::new(Mode::Greeter).unwrap();
     greeter.settle(Phase::Rest);

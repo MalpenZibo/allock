@@ -39,6 +39,8 @@ zeroize = "1"
 # ext-idle-notify, to rest the fingerprint reader. The versions guido uses.
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+# wlr-screencopy, for the snapshot the lock starts on.
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 uzers = { version = "0.12", default-features = false }
 libc = "0.2"
 
