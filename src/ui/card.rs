@@ -51,12 +51,10 @@ pub fn view(screen: &Screen) -> Container {
         .child(guard(screen.theme))
 }
 
-/// "Locked · 12:49" and the battery.
+/// "Locked", or the machine in the greeter, and the battery. No time: the
+/// big clock above says it.
 fn top(screen: &Screen) -> Container {
     let theme = screen.theme;
-    let now = screen.now;
-    let time_format = screen.config.clock.time_format.clone();
-    let time = create_memo(move || now.get().format(&time_format).to_string());
     let what = match screen.mode {
         Mode::Greeter => screen.host.to_string(),
         Mode::Lock | Mode::Preview => "Locked".to_owned(),
@@ -69,13 +67,6 @@ fn top(screen: &Screen) -> Container {
             .color(theme.dim)
             .nowrap()
     };
-    let look = roll::Look {
-        size: 11.5,
-        line: 16.0,
-        weight: FontWeight::SEMI_BOLD,
-        spacing: 0.0,
-    };
-
     container()
         .width(fill())
         .layout(
@@ -83,12 +74,7 @@ fn top(screen: &Screen) -> Container {
                 .main_alignment(MainAlignment::SpaceBetween)
                 .cross_alignment(CrossAlignment::Center),
         )
-        .child(
-            container()
-                .layout(Flex::row().cross_alignment(CrossAlignment::Center))
-                .child(container().child(small(format!("{what} · "))))
-                .child(roll::view(time, look, move || theme.dim)),
-        )
+        .child(container().child(small(what)))
         .child({
             let screen = screen.clone();
             let battery = screen.battery;
