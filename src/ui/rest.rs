@@ -1,5 +1,5 @@
-//! The island at rest: a lock, what needs saying, the battery, and the time
-//! where the big clock is not there to tell it.
+//! The island at rest: a lock, whose session it is, what needs saying, the
+//! battery, and the time where the big clock is not there to tell it.
 
 use guido::prelude::*;
 
@@ -58,6 +58,21 @@ pub fn view(screen: &Screen, controls: Signal<bool>) -> Container {
         )
         .child(lockout_chip(screen, false))
         .child(caps_chip(screen, "Caps"))
+        .child({
+            let user = screen.user;
+            let greeter = screen.mode == Mode::Greeter;
+            // The greeter has nobody yet: it names the machine instead.
+            move || {
+                let name = user.get().filter(|_| !greeter)?.display_name;
+                Some(
+                    text(name)
+                        .font_size(12.0)
+                        .font_weight(FontWeight::SEMI_BOLD)
+                        .color(theme.sub)
+                        .nowrap(),
+                )
+            }
+        })
         .child(text(hint).font_size(12.0).color(theme.dim).nowrap())
         .child(battery_ring(screen, 18.0))
 }
