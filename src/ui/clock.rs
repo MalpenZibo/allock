@@ -46,34 +46,30 @@ pub fn view(screen: &Screen, height: Signal<f32>) -> Container {
     let springy = motion::spring;
 
     container()
-        .width(fill())
-        .layout(Flex::column().cross_alignment(CrossAlignment::Center))
-        .translate(place.transition(springy()))
-        .child(
-            container()
-                .widget_ref(clock_ref)
-                .layout(
-                    Flex::column()
-                        .spacing(10.0)
-                        .cross_alignment(CrossAlignment::Center),
-                )
-                .scale(
-                    (move || Scale::uniform(if awake.get() { AWAKE_SCALE } else { 1.0 }))
-                        .transition(springy()),
-                )
-                .opacity((move || if shown.get() { 1.0 } else { 0.0 }).transition(400.0))
-                .child(roll::rolling(time, TIME, move || {
-                    Color::WHITE.with_alpha(if awake.get() { 0.92 } else { 0.6 })
-                }))
-                .child(move || {
-                    let date = date.get();
-                    (!date.is_empty()).then(|| {
-                        text(date)
-                            .font_size(20.0)
-                            .font_weight(FontWeight::SEMI_BOLD)
-                            .color(theme.colors.text.with_alpha(0.7))
-                            .nowrap()
-                    })
-                }),
+        .widget_ref(clock_ref)
+        .align_self(Alignment::TOP_CENTER)
+        .layout(
+            Flex::column()
+                .spacing(10.0)
+                .cross_alignment(CrossAlignment::Center),
         )
+        .translate(place.transition(springy()))
+        .scale(
+            (move || Scale::uniform(if awake.get() { AWAKE_SCALE } else { 1.0 }))
+                .transition(springy()),
+        )
+        .opacity((move || if shown.get() { 1.0 } else { 0.0 }).transition(400.0))
+        .child(roll::rolling(time, TIME, move || {
+            Color::WHITE.with_alpha(if awake.get() { 0.92 } else { 0.6 })
+        }))
+        .child(move || {
+            let date = date.get();
+            (!date.is_empty()).then(|| {
+                text(date)
+                    .font_size(20.0)
+                    .font_weight(FontWeight::SEMI_BOLD)
+                    .color(theme.colors.text.with_alpha(0.7))
+                    .nowrap()
+            })
+        })
 }

@@ -161,8 +161,7 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
     };
 
     container()
-        .width(fill())
-        .layout(Flex::column().cross_alignment(CrossAlignment::Center))
+        .align_self(Alignment::TOP_CENTER)
         .translate(top.transition(springy()))
         .child(shape)
 }
