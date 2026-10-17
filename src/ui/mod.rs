@@ -59,6 +59,8 @@ pub struct Screen {
 }
 
 pub fn view(screen: Screen, output: OutputInfo) -> Container {
+    // ashell's components read it from here.
+    ashell_ui::provide_theme(screen.theme);
     let controls = shows_controls(&screen, output.id);
     let height = create_signal(0.0f32);
     let root_ref = create_widget_ref();

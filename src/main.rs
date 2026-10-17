@@ -112,15 +112,9 @@ async fn main() {
     }
 
     let config = Rc::new(config);
-    let reason = app.run(|_app| {
-        // For ashell's components, declared for the whole application: a
-        // surface's declarations do not reach its dynamic children (guido at
-        // 3f2222d), and there is one theme anyway.
-        ashell_ui::provide_theme(ui::theme::from_config(&config.appearance));
-        match mode {
-            Mode::Lock | Mode::Preview => run_lock(config.clone(), pam_service.clone(), mode),
-            Mode::Greeter => run_greeter(config.clone()),
-        }
+    let reason = app.run(|_app| match mode {
+        Mode::Lock | Mode::Preview => run_lock(config.clone(), pam_service.clone(), mode),
+        Mode::Greeter => run_greeter(config.clone()),
     });
 
     match reason {
