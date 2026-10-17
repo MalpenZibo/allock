@@ -1,8 +1,12 @@
 //! Where the island is in its life, and the timings between the steps.
 //!
 //! ```text
-//! Seed ─▶ Rest ⇄ Awake ─▶ Ok ─▶ Gone
+//! Seed ─▶ Awake ⇄ Rest
+//!            └──▶ Ok ─▶ Gone
 //! ```
+//!
+//! From the seed it opens straight into the card, with the reader listening,
+//! so a finger unlocks at once; only idleness folds it up into the rest.
 //!
 //! It starts and ends as the seed, the dot a bar folds its own island into,
 //! so the compositor's cut between the two processes falls under one dot that
@@ -97,12 +101,12 @@ impl Flow {
         flow
     }
 
-    /// The seed is on screen: grow out of it once it has been seen.
+    /// The seed is on screen: open into the card once it has been seen.
     pub fn grow(&self) {
         let phase = self.phase;
         set_timeout(Duration::from_millis(GROW_MS), move || {
             if phase.get_untracked() == Phase::Seed {
-                phase.set(Phase::Rest);
+                phase.set(Phase::Awake);
             }
         });
     }

@@ -190,6 +190,7 @@ fn snapshots() {
     lock.save("lock-1-rest");
     lock.settle(Phase::Awake);
     lock.save("lock-2-card");
+
     let state = lock.screen.auth.state;
     state.password.set(Secret::from("hunter2".to_owned()));
     lock.run(Duration::from_millis(600));
@@ -208,6 +209,9 @@ fn snapshots() {
     state.authenticated.set(true);
     lock.run(Duration::from_millis(400));
     lock.save("lock-6-ok");
+
+    // One application at a time: two on one thread share guido's globals.
+    drop(lock);
 
     // The session's own picture stands in for the snapshot: sharp on the
     // seed, blurred once the island grows.
@@ -228,8 +232,9 @@ fn snapshots() {
     over.save("snapshot-0-seed");
     over.screen.flow.grow();
     over.run(Duration::from_millis(1800));
-    over.save("snapshot-1-rest");
+    over.save("snapshot-1-card");
 
+    drop(over);
     let mut greeter = Scene::new(Mode::Greeter).unwrap();
     greeter.settle(Phase::Rest);
     greeter.save("greeter-1-rest");

@@ -23,9 +23,10 @@
 
 - Lock screen through `ext-session-lock-v1`, one surface per monitor, hotplug included
 - greetd greeter with a user picker and a session picker
-- One island at the top of the screen: it rests as a pill with the time, comes
-  down to meet you as the login card, and folds back into a dot when you are in
-- Type to unlock: the key that wakes the island is the first character of the password
+- One island: it grows out of a dot at the top straight into the login card,
+  with the fingerprint reader listening, folds up into a pill at the top when
+  nobody is there, and back into the dot when you are in
+- Type to unlock: the key that wakes the pill is the first character of the password
 - Password through PAM, fingerprint through fprintd (lock screen only)
 - A handoff with [ashell](https://github.com/MalpenZibo/ashell): the bar folds
   its island into the same dot before the lock appears, and grows back out of

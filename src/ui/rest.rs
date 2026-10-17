@@ -1,4 +1,5 @@
-//! The island at rest: a lock, the time, what needs saying, the battery.
+//! The island at rest: a lock, what needs saying, the battery, and the time
+//! where the big clock is not there to tell it.
 
 use guido::prelude::*;
 
@@ -7,7 +8,7 @@ use super::icons::{Icon, icon};
 use super::{Screen, roll};
 use crate::Mode;
 
-pub fn view(screen: &Screen) -> Container {
+pub fn view(screen: &Screen, controls: Signal<bool>) -> Container {
     let theme = screen.theme;
     let flow = screen.flow;
     let now = screen.now;
@@ -41,16 +42,20 @@ pub fn view(screen: &Screen) -> Container {
             14.0,
             theme.sub,
         ))
-        .child(roll::view(
-            time,
-            roll::Look {
-                size: 13.0,
-                line: 16.0,
-                weight: FontWeight::SEMI_BOLD,
-                spacing: 0.0,
-            },
-            move || theme.text,
-        ))
+        .child(
+            container()
+                .visible(move || !controls.get())
+                .child(roll::view(
+                    time,
+                    roll::Look {
+                        size: 13.0,
+                        line: 16.0,
+                        weight: FontWeight::SEMI_BOLD,
+                        spacing: 0.0,
+                    },
+                    move || theme.text,
+                )),
+        )
         .child(lockout_chip(screen, false))
         .child(caps_chip(screen, "Caps"))
         .child(text(hint).font_size(12.0).color(theme.dim).nowrap())

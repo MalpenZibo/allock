@@ -133,7 +133,7 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
                 built.update(|n| *n += 1);
                 let content = match shown.get() {
                     View::Seed => container().width(seed.size).height(seed.size),
-                    View::Rest => rest::view(&screen),
+                    View::Rest => rest::view(&screen, controls),
                     View::Card => card::view(&screen),
                     View::Ok => ok(&screen),
                 };
