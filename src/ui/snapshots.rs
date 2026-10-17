@@ -89,6 +89,7 @@ impl Scene {
         config.indicators.battery = false;
         let config = Rc::new(config);
 
+        ashell_ui::provide_theme(super::theme::from_config(&config.appearance));
         let auth = auth::start(Backend::Silent, None);
         let flow = Flow::start(auth, super::flow::FOLD_MS, || {});
         let mut screen = crate::screen(config, mode, auth, flow);

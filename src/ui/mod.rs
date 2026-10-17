@@ -7,10 +7,8 @@ mod card;
 mod clock;
 mod field;
 pub mod flow;
-mod icons;
 mod island;
 mod rest;
-mod roll;
 #[cfg(test)]
 mod snapshots;
 pub mod theme;
@@ -28,8 +26,8 @@ use crate::services::battery::Battery;
 use crate::services::power::Power;
 use crate::services::snapshot::Snapshot;
 use crate::system::user::UserInfo;
+use ashell_ui::Theme;
 use flow::{Flow, Phase};
-use theme::Theme;
 
 pub type Snapshots = std::sync::Arc<std::collections::HashMap<String, Snapshot>>;
 
@@ -38,6 +36,8 @@ pub type Snapshots = std::sync::Arc<std::collections::HashMap<String, Snapshot>>
 pub struct Screen {
     pub config: Rc<Config>,
     pub theme: Theme,
+    /// Behind the wallpaper, and instead of it.
+    pub background: Color,
     pub mode: Mode,
     pub flow: Flow,
     pub auth: Auth,
@@ -58,16 +58,6 @@ pub struct Screen {
     pub session: RwSignal<usize>,
 }
 
-/// The island's spring, the one every fold and growth uses: ashell's island
-/// moves on the same curve, so the handoff reads as one motion.
-pub fn spring() -> SpringConfig {
-    SpringConfig {
-        mass: 1.0,
-        stiffness: 230.0,
-        damping: 21.0,
-    }
-}
-
 pub fn view(screen: Screen, output: OutputInfo) -> Container {
     let controls = shows_controls(&screen, output.id);
     let height = create_signal(0.0f32);
@@ -78,7 +68,7 @@ pub fn view(screen: Screen, output: OutputInfo) -> Container {
         .width(fill())
         .height(fill())
         .widget_ref(root_ref)
-        .background(screen.theme.background)
+        .background(screen.background)
         .layout(ZStack::new())
         .child(background::view(&screen, &output))
         .child({

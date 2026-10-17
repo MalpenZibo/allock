@@ -41,8 +41,6 @@ const OK_MS: u64 = 600;
 pub const FOLD_MS: u64 = 650;
 /// The same, when the background sharpens back into what comes next as well.
 pub const SHARPEN_MS: u64 = 1100;
-/// After a card appears, the key or click that woke it cannot press a button.
-pub const ARM_MS: u64 = 450;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Zone {

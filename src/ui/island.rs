@@ -3,10 +3,12 @@
 
 use guido::prelude::*;
 
-use super::flow::{ARM_MS, Phase};
-use super::icons::{Icon, weighted};
-use super::{Overhang, Screen, card, rest, spring};
+use super::flow::Phase;
+use super::{Overhang, Screen, card, rest};
 use crate::services::auth::NoticeLevel;
+use ashell_ui::Icon;
+use ashell_ui::icons::weighted;
+use ashell_ui::motion::{self, arriving, shake};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
@@ -88,9 +90,9 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
     let theme = screen.theme;
     let ring = move || match glow.get() {
         Glow::None => Color::TRANSPARENT,
-        Glow::Error => theme.danger,
-        Glow::Ok => theme.success,
-        Glow::Warning => theme.warning,
+        Glow::Error => theme.colors.danger,
+        Glow::Ok => theme.colors.success,
+        Glow::Warning => theme.colors.warning,
     };
     let shadows = move || {
         let ring = ring();
@@ -102,7 +104,7 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
         ])
     };
 
-    let springy = || Transition::spring(spring());
+    let springy = || motion::spring();
     let shape = container()
         .width((move || size.get().0).transition(springy().reverse(springy().delay(WIDTH_LAG_MS))))
         .height(
@@ -122,7 +124,7 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
             })
             .transition(springy()),
         )
-        .background(theme.island)
+        .background(theme.colors.island)
         .shadow(shadows.transition(400.0))
         .overflow(Overflow::Hidden)
         .layout(Overhang)
@@ -162,61 +164,16 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
         .child(shape)
 }
 
-/// A view arrives out of focus and slightly small, and leaves quickly the same
-/// way, slightly large: the island's content changes under one shape.
-fn arriving(content: Container) -> Container {
-    let enter = || Transition::new(300.0, TimingFunction::EaseOut).delay(70.0);
-    let leave = || Transition::new(160.0, TimingFunction::EaseOut);
-    container()
-        .opacity(
-            1.0.transition(enter().reverse(leave()))
-                .entering_from(0.0)
-                .exiting_to(0.0),
-        )
-        .blur(
-            0.0.transition(leave().reverse(enter()))
-                .entering_from(8.0)
-                .exiting_to(8.0),
-        )
-        .scale(
-            Scale::NONE
-                .transition(Transition::spring(spring()))
-                .entering_from(Scale::uniform(0.92))
-                .exiting_to(Scale::uniform(1.05)),
-        )
-        .pivot(Pivot::TOP)
-        .child(content)
-}
-
 fn ok(screen: &Screen) -> Container {
     container()
         .width(76.0)
         .height(76.0)
         .layout(Flex::column().center())
         .child(
-            weighted(Icon::Check, 34.0, 3.0, screen.theme.success).scale(
+            weighted(Icon::Check, 34.0, 3.0, screen.theme.colors.success).scale(
                 Scale::NONE
                     .transition(Transition::spring(SpringConfig::BOUNCY))
                     .entering_from(Scale::uniform(0.4)),
             ),
         )
-}
-
-fn shake() -> Keyframes<Translate> {
-    Keyframes::new(420.0)
-        .at(0.0, Translate::NONE)
-        .at(0.15, Translate::new(-9.0, 0.0))
-        .at(0.35, Translate::new(8.0, 0.0))
-        .at(0.55, Translate::new(-6.0, 0.0))
-        .at(0.75, Translate::new(3.0, 0.0))
-        .at(1.0, Translate::NONE)
-}
-
-/// Whether a card built `ARM_MS` ago may be pressed yet.
-pub fn armed() -> Signal<bool> {
-    let armed = create_signal(false);
-    set_timeout(std::time::Duration::from_millis(ARM_MS), move || {
-        armed.set(true)
-    });
-    armed.into()
 }

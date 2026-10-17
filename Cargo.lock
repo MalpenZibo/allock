@@ -29,6 +29,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ashell-services",
+ "ashell-ui",
  "chrono",
  "clap",
  "env_logger",
@@ -149,6 +150,13 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "zbus",
+]
+
+[[package]]
+name = "ashell-ui"
+version = "0.0.0"
+dependencies = [
+ "guido",
 ]
 
 [[package]]
@@ -956,7 +964,7 @@ dependencies = [
 [[package]]
 name = "guido"
 version = "0.12.0"
-source = "git+https://github.com/MalpenZibo/guido?branch=main#1f376471269fb33c45828664ed349cdd8534f3c7"
+source = "git+https://github.com/MalpenZibo/guido?branch=main#3f2222d2bf93d56595b33cf687201fca77935204"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
@@ -985,7 +993,7 @@ dependencies = [
 [[package]]
 name = "guido-macros"
 version = "0.12.0"
-source = "git+https://github.com/MalpenZibo/guido?branch=main#1f376471269fb33c45828664ed349cdd8534f3c7"
+source = "git+https://github.com/MalpenZibo/guido?branch=main#3f2222d2bf93d56595b33cf687201fca77935204"
 dependencies = [
  "proc-macro2",
  "quote",

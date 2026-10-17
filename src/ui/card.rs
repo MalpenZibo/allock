@@ -5,16 +5,19 @@ use std::time::SystemTime;
 
 use guido::prelude::*;
 
+use super::Screen;
 use super::field;
 use super::flow::Zone;
-use super::icons::{Icon, icon};
-use super::island::armed;
-use super::theme::Theme;
-use super::{Screen, roll, spring};
 use crate::Mode;
 use crate::services::auth::{FingerprintState, Lock, NoticeLevel};
 use crate::services::power::PowerAction;
 use crate::system::user::UserInfo;
+use ashell_ui::Theme;
+use ashell_ui::button::{Content, chip_button};
+use ashell_ui::motion::{self, armed};
+use ashell_ui::progress::ring;
+use ashell_ui::roll;
+use ashell_ui::{Icon, icon};
 
 const WIDTH: f32 = 400.0;
 
@@ -64,7 +67,7 @@ fn top(screen: &Screen) -> Container {
             .font_size(11.5)
             .line_height(LineHeight::Absolute(16.0))
             .font_weight(FontWeight::SEMI_BOLD)
-            .color(theme.dim)
+            .color(theme.colors.dim)
             .nowrap()
     };
     container()
@@ -107,17 +110,9 @@ fn identity(screen: &Screen) -> Container {
         )
         .child(
             container()
-                .width(96.0)
-                .height(96.0)
-                .layout(ZStack::new())
+                .layout(ZStack::new().align(Alignment::CENTER))
                 .child(fingerprint_ring(screen))
-                .child(
-                    container()
-                        .width(96.0)
-                        .height(96.0)
-                        .layout(Flex::column().center())
-                        .child(move || avatar(theme, user.get().as_ref(), 76.0)),
-                ),
+                .child(move || avatar(theme, user.get().as_ref(), 76.0)),
         )
         .child(move || {
             let user = user.get();
@@ -138,14 +133,14 @@ fn identity(screen: &Screen) -> Container {
                     text(name)
                         .font_size(16.0)
                         .font_weight(FontWeight::SEMI_BOLD)
-                        .color(theme.text)
+                        .color(theme.colors.text)
                         .nowrap(),
                 )
                 .child(
                     text(account)
                         .font_size(11.5)
                         .font_weight(FontWeight::MEDIUM)
-                        .color(theme.dim)
+                        .color(theme.colors.dim)
                         .nowrap(),
                 )
         })
@@ -159,8 +154,8 @@ fn avatar(theme: Theme, user: Option<&UserInfo>, size: f32) -> Container {
         .corners(size / 2.0)
         .overflow(Overflow::Hidden)
         .gradient(LinearGradient::new(
-            theme.accent,
-            theme.danger,
+            theme.colors.accent,
+            theme.colors.danger,
             GradientDirection::Diagonal,
         ))
         .layout(Flex::column().center());
@@ -178,10 +173,10 @@ fn avatar(theme: Theme, user: Option<&UserInfo>, size: f32) -> Container {
             )
             .font_size(size * 0.4)
             .font_weight(FontWeight::BOLD)
-            .color(theme.accent_ink)
+            .color(theme.colors.accent_ink)
             .nowrap(),
         ),
-        None => disc.child(icon(Icon::User, size * 0.4, theme.accent_ink)),
+        None => disc.child(icon(Icon::User, size * 0.4, theme.colors.accent_ink)),
     }
 }
 
@@ -218,21 +213,17 @@ fn fingerprint_ring(screen: &Screen) -> Container {
         // Rebuilt when the speed changes, so the endless orbit stops with it.
         .child(move || {
             let (share, color, lap_ms) = match reader.get() {
-                Reader::Off => (0.0, theme.accent, None),
-                Reader::Scanning => (0.2, theme.accent, Some(1600.0)),
-                Reader::Reading => (0.6, theme.accent, Some(800.0)),
-                Reader::Refused => (1.0, theme.danger, None),
+                Reader::Off => (0.0, theme.colors.accent, None),
+                Reader::Scanning => (0.2, theme.colors.accent, Some(1600.0)),
+                Reader::Reading => (0.6, theme.colors.accent, Some(800.0)),
+                Reader::Refused => (1.0, theme.colors.danger, None),
             };
             let ring = arc()
                 .size(96.0)
                 .stroke(3.0)
                 .caps(Cap::Round)
                 .color(color.transition(300.0))
-                .progress(
-                    share
-                        .transition(Transition::spring(spring()))
-                        .entering_from(0.0),
-                );
+                .progress(share.transition(motion::spring()).entering_from(0.0));
             let ring = container().width(96.0).height(96.0).child(ring);
             match lap_ms {
                 Some(ms) => ring.rotate(
@@ -284,8 +275,8 @@ fn users(screen: &Screen, armed: Signal<bool>) -> Container {
             })
             .child(
                 container()
-                    .width(size.transition(Transition::spring(spring())))
-                    .height(size.transition(Transition::spring(spring())))
+                    .width(size.transition(motion::spring()))
+                    .height(size.transition(motion::spring()))
                     .layout(Flex::column().center())
                     .child({
                         let user = user.clone();
@@ -296,7 +287,7 @@ fn users(screen: &Screen, armed: Signal<bool>) -> Container {
                 text(name)
                     .font_size(12.0)
                     .font_weight(FontWeight::SEMI_BOLD)
-                    .color(theme.text)
+                    .color(theme.colors.text)
                     .nowrap(),
             )
     }))
@@ -324,42 +315,42 @@ fn message(screen: &Screen) -> Container {
             };
             let notice = state.notice.get().filter(|n| !n.text.is_empty());
             if state.busy.get() {
-                return Some(line(None, "Checking…".to_owned(), theme.dim));
+                return Some(line(None, "Checking…".to_owned(), theme.colors.dim));
             }
             if state.locked.get().is_some() {
                 return Some(lockout_chip(&screen, true));
             }
             if let Some(notice) = notice {
                 let color = match notice.level {
-                    NoticeLevel::Error => theme.danger,
-                    NoticeLevel::Info => theme.dim,
+                    NoticeLevel::Error => theme.colors.danger,
+                    NoticeLevel::Info => theme.colors.dim,
                 };
                 return Some(line(None, notice.text, color));
             }
             let (words, color) = match state.fingerprint.get() {
-                FingerprintState::Waiting => {
-                    ("Or touch the fingerprint sensor".to_owned(), theme.dim)
-                }
+                FingerprintState::Waiting => (
+                    "Or touch the fingerprint sensor".to_owned(),
+                    theme.colors.dim,
+                ),
                 FingerprintState::Reading => {
-                    ("Checking your fingerprint…".to_owned(), theme.accent)
+                    ("Checking your fingerprint…".to_owned(), theme.colors.accent)
                 }
-                FingerprintState::Retry(hint) => (hint, theme.warning),
+                FingerprintState::Retry(hint) => (hint, theme.colors.warning),
                 FingerprintState::Exhausted => (
                     "Too many fingerprint attempts — use your password".to_owned(),
-                    theme.dim,
+                    theme.colors.dim,
                 ),
                 FingerprintState::Unavailable | FingerprintState::Resting => return None,
             };
-            Some(line(Some(Icon::Finger), words, color))
+            Some(line(Some(Icon::Fingerprint), words, color))
         })
 }
 
-/// The buttons that open the drawer.
+/// The chips that open the drawer.
 fn zones(screen: &Screen, armed: Signal<bool>) -> Container {
-    let theme = screen.theme;
     let flow = screen.flow;
-    let toggle = move |zone: Zone| {
-        move || {
+    let zone_chip = move |content: Content, zone: Zone| {
+        chip_button(content, move || flow.zone.get() == Some(zone)).on_click(move || {
             if armed.get_untracked() {
                 flow.zone.update(|open| {
                     *open = if *open == Some(zone) {
@@ -369,49 +360,22 @@ fn zones(screen: &Screen, armed: Signal<bool>) -> Container {
                     }
                 });
             }
-        }
-    };
-    let pill = move |zone: Zone| {
-        container()
-            .height(30.0)
-            .padding([0.0, 12.0])
-            .corners(15.0)
-            .background(
-                (move || {
-                    if flow.zone.get() == Some(zone) {
-                        theme.surface2
-                    } else {
-                        theme.surface
-                    }
-                })
-                .transition(150.0),
-            )
-            .when_hovered(|s| s.background(theme.surface2))
-            .layout(
-                Flex::row()
-                    .spacing(7.0)
-                    .cross_alignment(CrossAlignment::Center),
-            )
-            .on_click(toggle(zone))
+        })
     };
 
     let sessions = screen.sessions.clone();
     let session = screen.session;
     let session_zone = (screen.mode == Mode::Greeter && sessions.len() > 1).then(|| {
-        pill(Zone::Session)
-            .child(icon(Icon::Monitor, 13.0, theme.text))
-            .child(move || {
-                let name = sessions
-                    .get(session.get())
-                    .map(|s| s.name.clone())
-                    .unwrap_or_default();
-                text(name)
-                    .font_size(12.0)
-                    .font_weight(FontWeight::SEMI_BOLD)
-                    .color(theme.text)
-                    .nowrap()
-            })
-            .child(icon(Icon::ChevronDown, 12.0, theme.sub))
+        let name = create_memo(move || {
+            sessions
+                .get(session.get())
+                .map(|s| s.name.clone())
+                .unwrap_or_default()
+        });
+        zone_chip(
+            Content::IconLabel(Icon::Monitor, name.into_signal()),
+            Zone::Session,
+        )
     });
 
     container()
@@ -421,51 +385,15 @@ fn zones(screen: &Screen, armed: Signal<bool>) -> Container {
                 .main_alignment(MainAlignment::Center),
         )
         .child(session_zone)
-        .child(pill(Zone::Power).child(icon(Icon::Power, 13.0, theme.text)))
+        .child(zone_chip(Icon::Power.into(), Zone::Power))
 }
 
 /// What the open zone offers.
 fn drawer(screen: &Screen, armed: Signal<bool>) -> Container {
-    let theme = screen.theme;
     let flow = screen.flow;
     let sessions = screen.sessions.clone();
     let session = screen.session;
     let power = screen.power;
-
-    let option = move |label: String, icon_kind: Option<Icon>, on: bool, danger: bool| {
-        let ink = if on { theme.accent_ink } else { theme.sub };
-        container()
-            .height(30.0)
-            .padding([0.0, 12.0])
-            .corners(15.0)
-            .background(if on { theme.accent } else { Color::TRANSPARENT })
-            .when_hovered(move |s| {
-                s.background(if on {
-                    theme.accent
-                } else if danger {
-                    theme.danger.with_alpha(0.3)
-                } else {
-                    theme.surface2
-                })
-            })
-            .layout(
-                Flex::row()
-                    .spacing(7.0)
-                    .cross_alignment(CrossAlignment::Center),
-            )
-            .child(icon_kind.map(|kind| icon(kind, 13.0, ink)))
-            .child(
-                text(label)
-                    .font_size(12.0)
-                    .font_weight(if on {
-                        FontWeight::SEMI_BOLD
-                    } else {
-                        FontWeight::MEDIUM
-                    })
-                    .color(ink)
-                    .nowrap(),
-            )
-    };
 
     container()
         .visible(move || flow.zone.get().is_some())
@@ -496,23 +424,18 @@ fn drawer(screen: &Screen, armed: Signal<bool>) -> Container {
                 Zone::Session => {
                     let chosen = session.get_untracked();
                     row.children(sessions.iter().enumerate().map(|(index, s)| {
-                        option(s.name.clone(), None, index == chosen, false)
+                        chip_button(s.name.clone(), index == chosen)
                             .on_click(choose(Box::new(move || session.set(index))))
                     }))
                 }
                 Zone::Power => row.children(PowerAction::ALL.into_iter().map(|action| {
-                    let icon_kind = match action {
+                    let kind = match action {
                         PowerAction::Suspend => Icon::Moon,
                         PowerAction::Reboot => Icon::Refresh,
                         PowerAction::PowerOff => Icon::Power,
                     };
-                    option(
-                        action.label().to_owned(),
-                        Some(icon_kind),
-                        false,
-                        action != PowerAction::Suspend,
-                    )
-                    .on_click(choose(Box::new(move || power.request(action))))
+                    chip_button((kind, action.label()), false)
+                        .on_click(choose(Box::new(move || power.request(action))))
                 })),
             })
         })
@@ -522,31 +445,30 @@ fn drawer(screen: &Screen, armed: Signal<bool>) -> Container {
 fn guard(theme: Theme) -> Container {
     container()
         .width(fill())
-        .height(fill())
         .padding(Padding {
             top: 0.0,
             right: 24.0,
             bottom: 6.0,
             left: 24.0,
         })
-        .layout(Flex::column().main_alignment(MainAlignment::End))
+        .align_self(Alignment::BOTTOM_CENTER)
         .child(
             container()
                 .width(fill())
                 .height(2.0)
                 .corners(1.0)
-                .background(theme.accent)
+                .background(theme.colors.accent)
                 .pivot(Pivot::LEFT)
                 .scale(
                     Scale::new(0.0, 1.0).timeline(
-                        Keyframes::new(super::flow::ARM_MS as f32)
+                        Keyframes::new(motion::ARM_MS as f32)
                             .at(0.0, Scale::NONE)
                             .at(1.0, Scale::new(0.0, 1.0)),
                     ),
                 )
                 .opacity(
                     0.0.timeline(
-                        Keyframes::new(super::flow::ARM_MS as f32)
+                        Keyframes::new(motion::ARM_MS as f32)
                             .at(0.0, 0.85)
                             .at(1.0, 0.0),
                     ),
@@ -561,23 +483,20 @@ pub fn battery_ring(screen: &Screen, size: f32) -> Container {
     container().child(move || {
         let battery = battery.get()?;
         let color = if battery.charging {
-            theme.success
+            theme.colors.success
         } else if battery.percent <= 15 {
-            theme.danger
+            theme.colors.danger
         } else if battery.percent <= 30 {
-            theme.warning
+            theme.colors.warning
         } else {
-            theme.text
+            theme.colors.text
         };
-        Some(
-            arc()
-                .size(size)
-                .stroke(size * 0.145)
-                .track(Color::WHITE.with_alpha(0.16))
-                .caps(Cap::Round)
-                .color(color.transition(300.0))
-                .progress((f32::from(battery.percent) / 100.0).transition(1000.0)),
-        )
+        Some(ring(
+            f32::from(battery.percent) / 100.0,
+            color,
+            size,
+            size * 0.145,
+        ))
     })
 }
 
@@ -589,7 +508,8 @@ pub fn caps_chip(screen: &Screen, words: &'static str) -> Container {
         .visible(move || keyboard_modifiers().get().caps_lock)
         .child(move || {
             keyboard_modifiers().get().caps_lock.then(|| {
-                chip(Icon::Caps, theme.warning).child(chip_text(words.to_owned(), theme.warning))
+                chip(Icon::CapsLock, theme.colors.warning)
+                    .child(chip_text(words.to_owned(), theme.colors.warning))
             })
         })
 }
@@ -622,9 +542,9 @@ pub fn lockout_chip(screen: &Screen, long: bool) -> Container {
                             .spacing(8.0)
                             .cross_alignment(CrossAlignment::Center),
                     )
-                    .child(icon(Icon::Lock, 14.0, theme.warning))
+                    .child(icon(Icon::Lock, 14.0, theme.colors.warning))
             } else {
-                chip(Icon::Lock, theme.warning)
+                chip(Icon::Lock, theme.colors.warning)
             };
             let (size, weight) = if long {
                 (12.0, FontWeight::SEMI_BOLD)
@@ -633,11 +553,11 @@ pub fn lockout_chip(screen: &Screen, long: bool) -> Container {
             };
             Some(match lock {
                 Lock::UntilReset => {
-                    row.child(chip_text("Account locked".to_owned(), theme.warning))
+                    row.child(chip_text("Account locked".to_owned(), theme.colors.warning))
                 }
                 Lock::Until(_) => row
-                    .child(long.then(|| chip_text("Locked for".to_owned(), theme.warning)))
-                    .child(roll::view(
+                    .child(long.then(|| chip_text("Locked for".to_owned(), theme.colors.warning)))
+                    .child(roll::rolling(
                         left,
                         roll::Look {
                             size,
@@ -645,7 +565,7 @@ pub fn lockout_chip(screen: &Screen, long: bool) -> Container {
                             weight,
                             spacing: 0.0,
                         },
-                        move || theme.warning,
+                        move || theme.colors.warning,
                     )),
             })
         })

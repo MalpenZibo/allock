@@ -22,7 +22,6 @@ use crate::services::handoff::Handoff;
 use crate::services::{battery, clock, idle, power::Power, snapshot};
 use crate::system::{last_login, user};
 use crate::ui::flow::{FOLD_MS, Flow, Phase, SHARPEN_MS};
-use crate::ui::theme::Theme;
 use crate::ui::{Screen, Snapshots};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,9 +112,15 @@ async fn main() {
     }
 
     let config = Rc::new(config);
-    let reason = app.run(|_app| match mode {
-        Mode::Lock | Mode::Preview => run_lock(config.clone(), pam_service.clone(), mode),
-        Mode::Greeter => run_greeter(config.clone()),
+    let reason = app.run(|_app| {
+        // For ashell's components, declared for the whole application: a
+        // surface's declarations do not reach its dynamic children (guido at
+        // 3f2222d), and there is one theme anyway.
+        ashell_ui::provide_theme(ui::theme::from_config(&config.appearance));
+        match mode {
+            Mode::Lock | Mode::Preview => run_lock(config.clone(), pam_service.clone(), mode),
+            Mode::Greeter => run_greeter(config.clone()),
+        }
     });
 
     match reason {
@@ -131,7 +136,8 @@ async fn main() {
 /// The parts of a [`Screen`] every mode builds the same way.
 fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
     Screen {
-        theme: Theme::new(&config.appearance),
+        theme: ui::theme::from_config(&config.appearance),
+        background: config::color(config.appearance.background_color),
         mode,
         flow,
         auth,
@@ -472,7 +478,7 @@ fn spawn_fullscreen_surfaces(screen: Screen, keyboard: KeyboardInteractivity) {
                     .keyboard_interactivity(keyboard)
                     .namespace("allock")
                     .output(output.id)
-                    .background_color(screen.theme.background),
+                    .background_color(screen.background),
                 move || ui::view(screen.clone(), info.clone()),
             );
             handles.insert(output.id, handle);

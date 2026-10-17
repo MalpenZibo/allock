@@ -9,8 +9,9 @@ use guido::prelude::*;
 
 use super::Screen;
 use super::flow::Phase;
-use super::icons::{Icon, icon};
 use crate::Mode;
+use ashell_ui::button::{Fill, Size, icon_button, pressable};
+use ashell_ui::{Icon, icon};
 
 /// The input the keyboard types into, kept out of sight.
 pub fn keyboard(screen: &Screen) -> Container {
@@ -126,7 +127,11 @@ pub fn view(screen: &Screen) -> Container {
             .font_size(15.0)
             .line_height(LineHeight::Absolute(20.0))
             .letter_spacing(if masked && !empty { 1.8 } else { 0.0 })
-            .color(if empty { theme.dim } else { theme.text })
+            .color(if empty {
+                theme.colors.dim
+            } else {
+                theme.colors.text
+            })
             .nowrap()
             .overflow(TextOverflow::Ellipsis)
     };
@@ -135,13 +140,13 @@ pub fn view(screen: &Screen) -> Container {
         .width(fill())
         .height(46.0)
         .corners(23.0)
-        .background(theme.surface)
+        .background(theme.colors.surface)
         .shadow(
             (move || {
                 let ring = if failed.get() {
-                    theme.danger
+                    theme.colors.danger
                 } else {
-                    theme.accent.with_alpha(0.7)
+                    theme.colors.accent.with_alpha(0.7)
                 };
                 Shadow::new((0.0, 0.0), 0.0, 1.5, ring).inset()
             })
@@ -160,22 +165,20 @@ pub fn view(screen: &Screen) -> Container {
                 .cross_alignment(CrossAlignment::Center),
         )
         .child(container().width(fill()).child(typed))
-        .child(move || secret.get().then(|| reveal(theme, flow)))
+        .child(move || secret.get().then(|| reveal(flow)))
         .child(go(screen))
 }
 
-fn reveal(theme: super::theme::Theme, flow: super::flow::Flow) -> Container {
-    round_button(34.0)
-        .when_hovered(|s| s.background(theme.surface2))
+fn reveal(flow: super::flow::Flow) -> Container {
+    let kind = move || {
+        if flow.reveal.get() {
+            Icon::EyeOff
+        } else {
+            Icon::Eye
+        }
+    };
+    icon_button(kind, Size::Small, Fill::Ghost)
         .on_click(move || flow.reveal.update(|shown| *shown = !*shown))
-        .child(move || {
-            let kind = if flow.reveal.get() {
-                Icon::EyeOff
-            } else {
-                Icon::Eye
-            };
-            icon(kind, 16.0, theme.sub)
-        })
 }
 
 /// Submit. The only part of the field that takes a click: a stray click
@@ -186,36 +189,40 @@ fn go(screen: &Screen) -> Container {
     let state = auth.state;
     let ready = move || !state.field_is_empty();
 
-    round_button(34.0)
-        .background(
-            (move || {
-                if ready() || state.busy.get() {
-                    theme.accent
-                } else {
-                    theme.surface2
-                }
-            })
-            .transition(200.0),
-        )
-        .on_click(move || auth.submit())
-        .child(move || {
-            if state.busy.get() {
-                icon(Icon::Refresh, 16.0, theme.accent_ink).rotate(0.0.timeline(spin()))
+    // ashell's press and hover, with a fill that says whether there is
+    // anything to send.
+    pressable(
+        container()
+            .width(34.0)
+            .height(34.0)
+            .corners(17.0)
+            .layout(Flex::column().center()),
+        0.9,
+    )
+    .background(
+        (move || {
+            if ready() || state.busy.get() {
+                theme.colors.accent
             } else {
-                icon(Icon::Arrow, 16.0, move || {
-                    if ready() { theme.accent_ink } else { theme.dim }
-                })
+                theme.colors.surface2
             }
         })
-}
-
-fn round_button(size: f32) -> Container {
-    container()
-        .width(size)
-        .height(size)
-        .corners(size / 2.0)
-        .background(Color::TRANSPARENT.transition(150.0))
-        .layout(Flex::column().center())
+        .transition(200.0),
+    )
+    .on_click(move || auth.submit())
+    .child(move || {
+        if state.busy.get() {
+            icon(Icon::Refresh, 16.0, theme.colors.accent_ink).rotate(0.0.timeline(spin()))
+        } else {
+            icon(Icon::ArrowRight, 16.0, move || {
+                if ready() {
+                    theme.colors.accent_ink
+                } else {
+                    theme.colors.dim
+                }
+            })
+        }
+    })
 }
 
 pub fn spin() -> Keyframes<f32> {

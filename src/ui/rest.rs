@@ -3,10 +3,11 @@
 
 use guido::prelude::*;
 
+use super::Screen;
 use super::card::{battery_ring, caps_chip, lockout_chip};
-use super::icons::{Icon, icon};
-use super::{Screen, roll};
 use crate::Mode;
+use ashell_ui::roll;
+use ashell_ui::{Icon, icon};
 
 pub fn view(screen: &Screen, controls: Signal<bool>) -> Container {
     let theme = screen.theme;
@@ -40,12 +41,12 @@ pub fn view(screen: &Screen, controls: Signal<bool>) -> Container {
                 Mode::Lock | Mode::Preview => Icon::Lock,
             },
             14.0,
-            theme.sub,
+            theme.colors.sub,
         ))
         .child(
             container()
                 .visible(move || !controls.get())
-                .child(roll::view(
+                .child(roll::rolling(
                     time,
                     roll::Look {
                         size: 13.0,
@@ -53,7 +54,7 @@ pub fn view(screen: &Screen, controls: Signal<bool>) -> Container {
                         weight: FontWeight::SEMI_BOLD,
                         spacing: 0.0,
                     },
-                    move || theme.text,
+                    move || theme.colors.text,
                 )),
         )
         .child(lockout_chip(screen, false))
@@ -68,11 +69,11 @@ pub fn view(screen: &Screen, controls: Signal<bool>) -> Container {
                     text(name)
                         .font_size(12.0)
                         .font_weight(FontWeight::SEMI_BOLD)
-                        .color(theme.sub)
+                        .color(theme.colors.sub)
                         .nowrap(),
                 )
             }
         })
-        .child(text(hint).font_size(12.0).color(theme.dim).nowrap())
+        .child(text(hint).font_size(12.0).color(theme.colors.dim).nowrap())
         .child(battery_ring(screen, 18.0))
 }

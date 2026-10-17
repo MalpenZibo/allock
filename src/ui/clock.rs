@@ -3,8 +3,10 @@
 
 use guido::prelude::*;
 
+use super::Screen;
 use super::flow::Phase;
-use super::{Screen, roll, spring};
+use ashell_ui::motion;
+use ashell_ui::roll;
 
 const TIME: roll::Look = roll::Look {
     size: 118.0,
@@ -41,7 +43,7 @@ pub fn view(screen: &Screen, height: Signal<f32>) -> Container {
         let own = clock_ref.layout_rect().get().height;
         Translate::new(0.0, height.get() * at - own / 2.0)
     };
-    let springy = || Transition::spring(spring());
+    let springy = motion::spring;
 
     container()
         .width(fill())
@@ -60,7 +62,7 @@ pub fn view(screen: &Screen, height: Signal<f32>) -> Container {
                         .transition(springy()),
                 )
                 .opacity((move || if shown.get() { 1.0 } else { 0.0 }).transition(400.0))
-                .child(roll::view(time, TIME, move || {
+                .child(roll::rolling(time, TIME, move || {
                     Color::WHITE.with_alpha(if awake.get() { 0.92 } else { 0.6 })
                 }))
                 .child(move || {
@@ -69,7 +71,7 @@ pub fn view(screen: &Screen, height: Signal<f32>) -> Container {
                         text(date)
                             .font_size(20.0)
                             .font_weight(FontWeight::SEMI_BOLD)
-                            .color(theme.text.with_alpha(0.7))
+                            .color(theme.colors.text.with_alpha(0.7))
                             .nowrap()
                     })
                 }),
