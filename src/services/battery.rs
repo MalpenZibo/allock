@@ -1,13 +1,15 @@
 //! The system battery, read through ashell's UPower service.
 
-use ashell_services::upower::{BatteryStatus, UPower};
+use ashell_services::upower::UPower;
 use futures::StreamExt;
 use guido::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Battery {
     pub percent: u8,
-    pub charging: bool,
+    /// On the charger, as UPower's `OnBattery` says: unlike the battery's
+    /// state, it holds while the firmware pauses charging near full.
+    pub plugged: bool,
 }
 
 /// `None` until UPower answers, and on a machine without a battery.
@@ -26,11 +28,10 @@ pub fn watch() -> Signal<Option<Battery>> {
         while ctx.is_running()
             && let Some(data) = updates.next().await
         {
-            writer.set(data.system_battery.map(|data| Battery {
-                percent: data.capacity.clamp(0, 100) as u8,
-                // A full battery is not charging, as ashell's ring says:
-                // only charge going in is green.
-                charging: matches!(data.status, BatteryStatus::Charging(_)),
+            let plugged = !data.on_battery;
+            writer.set(data.system_battery.map(|battery| Battery {
+                percent: battery.capacity.clamp(0, 100) as u8,
+                plugged,
             }));
         }
     });

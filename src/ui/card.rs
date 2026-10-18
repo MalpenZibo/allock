@@ -603,7 +603,9 @@ pub fn battery_ring(screen: &Screen, size: f32) -> Container {
     let battery = screen.battery;
     container().child(move || {
         let battery = battery.get()?;
-        let color = if battery.charging {
+        // On the charger it is green, whatever the battery reports doing,
+        // as ashell's ring.
+        let color = if battery.plugged {
             theme.colors.success
         } else if battery.percent <= 15 {
             theme.colors.danger

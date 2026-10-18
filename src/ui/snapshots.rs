@@ -109,7 +109,7 @@ impl Scene {
         }
         screen.battery = create_signal(Some(crate::services::battery::Battery {
             percent: 59,
-            charging: false,
+            plugged: false,
         }))
         .read_only();
         screen.user.set(Some(UserInfo {
