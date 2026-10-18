@@ -66,6 +66,13 @@ primary_color = "#fab387"
 success_color = "#a6e3a1"
 warning_color = "#f9e2af"
 danger_color = "#f38ba8"
+# How much of island_color is painted, 0.0 to 1.0, as ashell's opacity; a
+# colour's own alpha (#rrggbbaa) multiplies with it. Give ashell's bar the same
+# value, or the seed changes across the handoff.
+opacity = 1.0
+# Whether what is behind a translucent island softens: "auto" (when opacity is
+# below 1), "always" or "never".
+blur = "auto"
 
 # Greeter only (allock --greeter).
 [greeter]

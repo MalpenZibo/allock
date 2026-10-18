@@ -88,5 +88,6 @@ always leaves its seed, since it cannot know what the session will start.
 | Value | Where |
 |---|---|
 | Seed size and position | `[island.seed]` in each one's config (same keys, same defaults: 30 and 6) |
+| The seed's colour and translucency | `island_color`, `opacity` and `blur` under `[appearance]`, set to the same values in each |
 | The spring every fold and growth uses | `ashell_ui::motion::ISLAND_SPRING` (mass 1, stiffness 230, damping 21) |
 | How long a fold takes | ~400 ms, from that spring |

@@ -75,11 +75,16 @@ struct Scene {
 
 impl Scene {
     fn new(mode: Mode) -> Option<Self> {
-        Self::with(mode, Default::default())
+        Self::with(mode, Default::default(), |_| {})
     }
 
     /// With the session's picture of each output, as the lock takes it.
-    fn with(mode: Mode, snapshots: super::Snapshots) -> Option<Self> {
+    /// `tune` changes the config before the screen reads it.
+    fn with(
+        mode: Mode,
+        snapshots: super::Snapshots,
+        tune: impl FnOnce(&mut Config),
+    ) -> Option<Self> {
         let mut app = Headless::new()?;
         let output = app.connect_output("eDP-1");
 
@@ -87,6 +92,7 @@ impl Scene {
         config.background.path = Some(wallpaper().to_string_lossy().into_owned());
         // UPower is not asked from a test; the ring is given a reading.
         config.indicators.battery = false;
+        tune(&mut config);
         let config = Rc::new(config);
 
         let auth = auth::start(Backend::Silent, None);
@@ -255,11 +261,8 @@ fn snapshots() {
         height: HEIGHT,
         pixels: desk.into_raw().into(),
     };
-    let mut over = Scene::with(
-        Mode::Lock,
-        std::sync::Arc::new([("eDP-1".to_owned(), snapshot)].into()),
-    )
-    .unwrap();
+    let snapshots: super::Snapshots = std::sync::Arc::new([("eDP-1".to_owned(), snapshot)].into());
+    let mut over = Scene::with(Mode::Lock, snapshots.clone(), |_| {}).unwrap();
     over.save("snapshot-0-seed");
     over.screen.flow.grow();
     // The seed opening into the card: the card at its own size, uncovered.
@@ -269,6 +272,20 @@ fn snapshots() {
     over.save("snapshot-1-card");
 
     drop(over);
+
+    // A translucent island softens the session through it, seed and card.
+    let mut glass = Scene::with(Mode::Lock, snapshots, |config| {
+        config.appearance.opacity = 0.6;
+    })
+    .unwrap();
+    glass.save("translucent-0-seed");
+    glass.screen.flow.grow();
+    glass.settle(Phase::Rest);
+    glass.save("translucent-1-rest");
+    glass.settle(Phase::Awake);
+    glass.run(Duration::from_millis(1800));
+    glass.save("translucent-2-card");
+    drop(glass);
 
     // Alone, with no bar to take the seed: the island pops out of nothing.
     // SAFETY: the test runs on one thread and nothing else reads the variable.

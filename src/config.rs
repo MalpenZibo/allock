@@ -299,6 +299,41 @@ pub struct Appearance {
     pub warning_color: HexColor,
     #[serde(deserialize_with = "base_color")]
     pub danger_color: HexColor,
+    /// How much of the island's colour is painted, from 0 to 1, the key
+    /// ashell's surfaces read. A colour's own alpha multiplies with it.
+    #[serde(deserialize_with = "opacity")]
+    pub opacity: f32,
+    /// Whether what is behind a translucent island softens.
+    pub blur: BlurMode,
+}
+
+/// When the island blurs what is behind it, as ashell's `blur`.
+#[derive(Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BlurMode {
+    /// Only when the island is translucent: an opaque one hides it anyway.
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
+
+impl BlurMode {
+    pub fn enabled(self, opacity: f32) -> bool {
+        match self {
+            Self::Auto => opacity < 1.0,
+            Self::Always => true,
+            Self::Never => false,
+        }
+    }
+}
+
+impl Appearance {
+    /// The island's paint, with its opacity.
+    pub fn island(&self) -> Color {
+        let island = color(self.island_color);
+        island.with_alpha(island.a * self.opacity)
+    }
 }
 
 impl Default for Appearance {
@@ -312,6 +347,8 @@ impl Default for Appearance {
             success_color: HexColor::rgb(166, 227, 161),
             warning_color: HexColor::rgb(249, 226, 175),
             danger_color: HexColor::rgb(243, 139, 168),
+            opacity: 1.0,
+            blur: BlurMode::Auto,
         }
     }
 }
@@ -328,8 +365,22 @@ fn base_color<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<HexCo
     })
 }
 
+fn opacity<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    let v = f32::deserialize(deserializer)?;
+    if (0.0..=1.0).contains(&v) {
+        Ok(v)
+    } else {
+        Err(serde::de::Error::custom("opacity is between 0.0 and 1.0"))
+    }
+}
+
 pub fn color(c: HexColor) -> Color {
-    Color::rgb(c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0)
+    Color::rgba(
+        c.r as f32 / 255.0,
+        c.g as f32 / 255.0,
+        c.b as f32 / 255.0,
+        c.a as f32 / 255.0,
+    )
 }
 
 /// The island's resting place. ashell reads the same `[island.seed]`, so the
@@ -540,8 +591,20 @@ mod tests {
         ] {
             assert_eq!(shown, default);
         }
+        assert_eq!(shown.opacity, defaults.opacity);
+        assert_eq!(shown.blur, defaults.blur);
         let (seed, default) = (example.island.seed, SeedConfig::default());
         assert_eq!((seed.size, seed.top), (default.size, default.top));
+    }
+
+    #[test]
+    fn the_island_is_painted_at_its_opacity_and_its_own_alpha() {
+        let config: Config =
+            toml::from_str("[appearance]\nisland_color = \"#00000080\"\nopacity = 0.5").unwrap();
+        let island = config.appearance.island();
+        assert!((island.a - 0.5 * 128.0 / 255.0).abs() < 1e-6);
+        assert!(config.appearance.blur.enabled(island.a));
+        assert!(toml::from_str::<Config>("[appearance]\nopacity = 1.5").is_err());
     }
 
     #[test]

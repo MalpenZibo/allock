@@ -10,7 +10,7 @@ pub fn from_config(appearance: &Appearance) -> Theme {
     let mut theme = Theme::default();
     let colors = &mut theme.colors;
     let text = color(appearance.text_color);
-    colors.island = color(appearance.island_color);
+    colors.island = appearance.island();
     colors.text = text;
     colors.sub = text.with_alpha(0.78);
     colors.dim = text.with_alpha(0.48);

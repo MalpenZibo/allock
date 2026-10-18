@@ -19,6 +19,9 @@ enum View {
 /// Where the card sits once someone is at it, from the middle of the output:
 /// the island comes down to meet them.
 const AWAKE_ABOVE_MIDDLE: f32 = 140.0;
+/// How far a translucent island softens what is behind it.
+const BACKDROP_BLUR: f32 = 24.0;
+
 /// Up to this height the island is a pill; past it, a card with these corners.
 const PILL_HEIGHT: f32 = 44.0;
 const CARD_CORNERS: f32 = 44.0;
@@ -102,6 +105,13 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
         ])
     };
 
+    let appearance = &screen.config.appearance;
+    let blur = if appearance.blur.enabled(theme.colors.island.a) {
+        BACKDROP_BLUR
+    } else {
+        0.0
+    };
+
     let springy = || motion::spring();
     let shape = container()
         .width((move || size.get().0).transition(springy().reverse(springy().delay(WIDTH_LAG_MS))))
@@ -122,6 +132,7 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
             })
             .transition(springy()),
         )
+        .backdrop_blur(BackdropBlur::new(blur))
         .background(theme.colors.island)
         .shadow(shadows.transition(400.0))
         .overflow(Overflow::Hidden)
