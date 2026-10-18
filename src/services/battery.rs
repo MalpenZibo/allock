@@ -28,10 +28,9 @@ pub fn watch() -> Signal<Option<Battery>> {
         {
             writer.set(data.system_battery.map(|data| Battery {
                 percent: data.capacity.clamp(0, 100) as u8,
-                charging: matches!(
-                    data.status,
-                    BatteryStatus::Charging(_) | BatteryStatus::Full
-                ),
+                // A full battery is not charging, as ashell's ring says:
+                // only charge going in is green.
+                charging: matches!(data.status, BatteryStatus::Charging(_)),
             }));
         }
     });
