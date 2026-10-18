@@ -131,13 +131,19 @@ impl Scene {
                 },
             ]);
             screen.sessions = Rc::new(
-                ["Niri", "Hyprland", "GNOME"]
-                    .map(|name| SessionDef {
-                        name: name.to_owned(),
-                        command: vec![name.to_lowercase()],
-                        env: Vec::new(),
-                    })
-                    .into(),
+                [
+                    "Niri",
+                    "CustomHyprland",
+                    "Hyprland",
+                    "Hyprland (uwsm-managed)",
+                    "GNOME",
+                ]
+                .map(|name| SessionDef {
+                    name: name.to_owned(),
+                    command: vec![name.to_lowercase()],
+                    env: Vec::new(),
+                })
+                .into(),
             );
         }
 
@@ -305,6 +311,15 @@ fn snapshots() {
     greeter.save("greeter-1-rest");
     greeter.settle(Phase::Awake);
     greeter.save("greeter-2-card");
+    greeter
+        .screen
+        .flow
+        .zone
+        .set(Some(super::flow::Zone::Session));
+    greeter.run(Duration::from_millis(800));
+    greeter.save("greeter-2b-sessions");
+    greeter.screen.flow.zone.set(None);
+    greeter.run(Duration::from_millis(800));
     greeter.settle(Phase::Gone);
     greeter.save("greeter-3-gone");
 }

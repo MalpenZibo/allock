@@ -14,6 +14,7 @@ use crate::services::power::PowerAction;
 use crate::system::user::UserInfo;
 use ashell_ui::Theme;
 use ashell_ui::button::{Content, chip_button};
+use ashell_ui::list;
 use ashell_ui::motion::{self, armed};
 use ashell_ui::progress::ring;
 use ashell_ui::roll;
@@ -495,24 +496,22 @@ fn drawer(screen: &Screen, armed: Signal<bool>) -> Container {
     let sessions = screen.sessions.clone();
     let session = screen.session;
     let power = screen.power;
+    let theme = screen.theme;
 
     container()
+        .width(fill())
         .visible(move || flow.zone.get().is_some())
         .child(move || {
             let zone = flow.zone.get()?;
-            let row = container()
-                .layout(
-                    Flex::row()
-                        .spacing(4.0)
-                        .main_alignment(MainAlignment::Center),
-                )
-                .opacity(1.0.transition(350.0).entering_from(0.0))
-                .blur(0.0.transition(350.0).entering_from(3.0))
-                .translate(
-                    Translate::NONE
-                        .transition(350.0)
-                        .entering_from(Translate::new(0.0, -6.0)),
-                );
+            let enter = |c: Container| {
+                c.opacity(1.0.transition(350.0).entering_from(0.0))
+                    .blur(0.0.transition(350.0).entering_from(3.0))
+                    .translate(
+                        Translate::NONE
+                            .transition(350.0)
+                            .entering_from(Translate::new(0.0, -6.0)),
+                    )
+            };
             let choose = move |action: Box<dyn Fn()>| {
                 move || {
                     if armed.get_untracked() {
@@ -522,14 +521,35 @@ fn drawer(screen: &Screen, armed: Signal<bool>) -> Container {
                 }
             };
             Some(match zone {
+                // A menu, one session a line: their names are too long, and
+                // too many, for a row of chips.
                 Zone::Session => {
                     let chosen = session.get_untracked();
-                    row.children(sessions.iter().enumerate().map(|(index, s)| {
-                        chip_button(s.name.clone(), index == chosen)
+                    enter(
+                        container()
+                            .width(fill())
+                            .layout(Flex::column().spacing(2.0)),
+                    )
+                    .children(sessions.iter().enumerate().map(|(index, s)| {
+                        let selected = index == chosen;
+                        let mut line = list::row(s.name.clone())
+                            .icon(Icon::Monitor)
+                            .selected(selected);
+                        if selected {
+                            line = line.trailing(icon(Icon::Check, 16.0, theme.colors.accent));
+                        }
+                        line.build()
                             .on_click(choose(Box::new(move || session.set(index))))
                     }))
                 }
-                Zone::Power => row.children(PowerAction::ALL.into_iter().map(|action| {
+                Zone::Power => enter(
+                    container().layout(
+                        Flex::row()
+                            .spacing(4.0)
+                            .main_alignment(MainAlignment::Center),
+                    ),
+                )
+                .children(PowerAction::ALL.into_iter().map(|action| {
                     let kind = match action {
                         PowerAction::Suspend => Icon::Moon,
                         PowerAction::Reboot => Icon::Refresh,
