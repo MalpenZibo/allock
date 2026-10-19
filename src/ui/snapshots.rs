@@ -99,14 +99,6 @@ impl Scene {
         let flow = Flow::start(auth, super::flow::FOLD_MS, || {});
         let mut screen = crate::screen(config, mode, auth, flow);
         screen.snapshots = snapshots;
-        // As with ashell on the bus: the seed is handed over both ways.
-        if mode == Mode::Lock && std::env::var_os("ALLOCK_SNAPSHOT_ALONE").is_none() {
-            let bar = create_signal(true).read_only();
-            screen.handover = super::Handover {
-                arrives: bar,
-                leaves: bar,
-            };
-        }
         screen.battery = create_signal(Some(crate::services::battery::Battery {
             percent: 59,
             plugged: false,
@@ -213,8 +205,12 @@ fn snapshots() {
         eprintln!("no GPU adapter; nothing drawn");
         return;
     };
+    // Nothing but the background: the island is up past the edge.
     lock.save("lock-0-seed");
     lock.screen.flow.grow();
+    // Dropping in, on the flow's wall-clock timer.
+    lock.run_real(Duration::from_millis(330));
+    lock.save("lock-0b-dropping");
     lock.settle(Phase::Rest);
     lock.save("lock-1-rest");
     lock.settle(Phase::Awake);
@@ -252,12 +248,15 @@ fn snapshots() {
     lock.save("lock-6-ok-drawing");
     lock.run_real(Duration::from_millis(330));
     lock.save("lock-6-ok");
+    // Going up into the edge.
+    lock.run_real(Duration::from_millis(200));
+    lock.save("lock-7-going");
 
     // One application at a time: two on one thread share guido's globals.
     drop(lock);
 
     // The session's own picture stands in for the snapshot: sharp on the
-    // seed, blurred once the island grows.
+    // first frame, blurred once the island drops in.
     let desk = ::image::open(wallpaper())
         .unwrap()
         .resize_exact(WIDTH, HEIGHT, ::image::imageops::FilterType::Triangle)
@@ -271,7 +270,7 @@ fn snapshots() {
     let mut over = Scene::with(Mode::Lock, snapshots.clone(), |_| {}).unwrap();
     over.save("snapshot-0-seed");
     over.screen.flow.grow();
-    // The seed opening into the card: the card at its own size, uncovered.
+    // Dropping in and opening into the card, at its own size, uncovered.
     over.run_real(Duration::from_millis(480));
     over.save("snapshot-0b-growing");
     over.run(Duration::from_millis(1800));
@@ -279,7 +278,7 @@ fn snapshots() {
 
     drop(over);
 
-    // A translucent island softens the session through it, seed and card.
+    // A translucent island softens the session through it.
     let mut glass = Scene::with(Mode::Lock, snapshots, |config| {
         config.appearance.opacity = 0.6;
     })
@@ -292,19 +291,6 @@ fn snapshots() {
     glass.run(Duration::from_millis(1800));
     glass.save("translucent-2-card");
     drop(glass);
-
-    // Alone, with no bar to take the seed: the island pops out of nothing.
-    // SAFETY: the test runs on one thread and nothing else reads the variable.
-    unsafe { std::env::set_var("ALLOCK_SNAPSHOT_ALONE", "1") };
-    let mut alone = Scene::new(Mode::Lock).unwrap();
-    unsafe { std::env::remove_var("ALLOCK_SNAPSHOT_ALONE") };
-    alone.save("alone-0-seed");
-    alone.screen.flow.grow();
-    alone.run_real(Duration::from_millis(450));
-    alone.save("alone-1-arriving");
-    alone.run_real(Duration::from_millis(900));
-    alone.save("alone-2-card");
-    drop(alone);
 
     let mut greeter = Scene::new(Mode::Greeter).unwrap();
     greeter.settle(Phase::Rest);

@@ -1,6 +1,6 @@
 //! allock: a session lock over `ext-session-lock-v1` and PAM, and a greetd
-//! greeter (`--greeter`), drawn as an island that starts and ends as the seed
-//! a bar folds its own island into.
+//! greeter (`--greeter`), drawn as an island that drops in from the top edge
+//! and leaves into it, where a bar's island has gone and comes back from.
 
 mod config;
 mod services;
@@ -144,7 +144,6 @@ fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
         now: clock::now(),
         host: system::hostname().into(),
         snapshots: Snapshots::default(),
-        handover: ui::Handover::none(),
         user: create_signal(None),
         users: Rc::new(Vec::new()),
         user_choice: create_signal(0),
@@ -155,7 +154,7 @@ fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
 }
 
 /// The PAM-backed screen: `Mode::Lock` takes the session lock once the bar
-/// has folded into the seed, `Mode::Preview` draws on overlay surfaces and
+/// has gone up past the top edge, `Mode::Preview` draws on overlay surfaces and
 /// exits once the password is accepted.
 fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
     let me = user::current();
@@ -208,15 +207,8 @@ fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
         }
     });
 
-    let mut screen = screen(config, mode, auth, flow);
+    let screen = screen(config, mode, auth, flow);
     screen.user.set(Some(me));
-    if let Some(handoff) = handoff {
-        // ashell takes the seed back only if it is there to.
-        screen.handover = ui::Handover {
-            arrives: handoff.bar,
-            leaves: handoff.bar,
-        };
-    }
 
     match handoff {
         None => {
@@ -234,8 +226,8 @@ fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
         Some(handoff) => {
             handoff.prepare();
             let ready = handoff.ready;
-            // The bar is the seed, or will not answer: the picture taken now
-            // has the seed where the lock draws its own.
+            // The bar's island is gone, or will not answer: the picture
+            // taken now has no island in it.
             once(
                 move || ready.get(),
                 move || {
@@ -311,7 +303,7 @@ fn watch_lock_lifecycle(handoff: Handoff, flow: Flow) {
             (_, LockState::Locked) => {
                 progress.set(Progress::Held);
                 handoff.locked();
-                // The compositor shows the seed now, where the bar left its own.
+                // The lock is on screen: the island drops in.
                 flow.grow();
             }
             (Progress::Held, LockState::Unlocked) => {
@@ -415,12 +407,6 @@ fn run_greeter(config: Rc<Config>) {
     let flow = Flow::start(auth, SHARPEN_MS, start_session);
 
     let mut screen = screen(config, Mode::Greeter, auth, flow);
-    // The session's bar starts as the seed, on the far side of greetd's
-    // compositor switch; there is none before the greeter.
-    screen.handover = ui::Handover {
-        arrives: create_signal(false).read_only(),
-        leaves: create_signal(true).read_only(),
-    };
     screen.users = users.clone();
     screen.user_choice = user_index;
     screen.sessions = sessions;

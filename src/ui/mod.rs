@@ -29,27 +29,6 @@ use crate::system::user::UserInfo;
 use ashell_ui::Theme;
 use flow::{Flow, Phase};
 
-/// Whether the seed is handed over across the compositor's cut. When
-/// nobody draws it on the other side, the island arrives and leaves by
-/// itself instead of as a lone dot.
-#[derive(Clone, Copy)]
-pub struct Handover {
-    /// A bar folded into the seed before the lock was drawn.
-    pub arrives: Signal<bool>,
-    /// Something will draw the seed once this screen is gone.
-    pub leaves: Signal<bool>,
-}
-
-impl Handover {
-    pub fn none() -> Self {
-        let no = create_signal(false).read_only();
-        Self {
-            arrives: no,
-            leaves: no,
-        }
-    }
-}
-
 pub type Snapshots = std::sync::Arc<std::collections::HashMap<String, Snapshot>>;
 
 /// Everything a screen reads. Cheap to clone.
@@ -74,7 +53,6 @@ pub struct Screen {
     /// Greeter only. "Other…" sits after these, at `users.len()`.
     pub users: Rc<Vec<UserInfo>>,
     pub user_choice: RwSignal<usize>,
-    pub handover: Handover,
     /// Greeter only.
     pub sessions: Rc<Vec<SessionDef>>,
     pub session: RwSignal<usize>,

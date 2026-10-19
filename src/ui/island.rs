@@ -19,6 +19,9 @@ enum View {
 /// Where the card sits once someone is at it, from the middle of the output:
 /// the island comes down to meet them.
 const AWAKE_ABOVE_MIDDLE: f32 = 140.0;
+/// How far past the top edge the seed goes, beyond its own size, so its
+/// shadow goes with it.
+const OFF_EDGE: f32 = 80.0;
 /// How far a translucent island softens what is behind it.
 const BACKDROP_BLUR: f32 = 24.0;
 
@@ -121,8 +124,8 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
         .corners(
             (move || {
                 let (w, h) = size.get();
-                // A pill and the seed are capsules, and the seed has to be
-                // the circle the bar draws; the card has continuous corners.
+                // A pill and the seed are capsules, the seed a circle; the
+                // card has continuous corners.
                 // The curvature eases between the two with the radius.
                 if h <= PILL_HEIGHT {
                     Corners::rounded(w.min(h) / 2.0)
@@ -160,39 +163,23 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
             }
         });
 
-    // Down to meet whoever is typing; back to the seed's place otherwise.
+    // Down to meet whoever is typing, back to its place at the top
+    // otherwise. Before it arrives and once it has gone it is up past the
+    // output's top edge: it drops in from there and leaves into it, as the
+    // bar's island does, so nothing is left on screen across the cut.
     let top = move || {
-        let down = controls.get() && flow.is_down();
-        let y = if down {
-            (height.get() / 2.0 - AWAKE_ABOVE_MIDDLE).max(seed.top)
-        } else {
-            seed.top
+        let y = match flow.phase.get() {
+            Phase::Seed | Phase::Gone => -(seed.size + OFF_EDGE),
+            _ if controls.get() && flow.is_down() => {
+                (height.get() / 2.0 - AWAKE_ABOVE_MIDDLE).max(seed.top)
+            }
+            _ => seed.top,
         };
         Translate::new(0.0, y)
-    };
-
-    // With nobody to hand the seed to, or from, it is not left on screen as a
-    // dot: the island pops out of it, and shrinks away into it.
-    let handover = screen.handover;
-    let shown = move || match flow.phase.get() {
-        Phase::Seed => handover.arrives.get(),
-        Phase::Gone => handover.leaves.get(),
-        Phase::Rest | Phase::Awake | Phase::Ok => true,
     };
     container()
         .align_self(Alignment::TOP_CENTER)
         .translate(top.transition(springy()))
-        .opacity((move || if shown() { 1.0 } else { 0.0 }).transition(motion::color()))
-        .scale(
-            (move || {
-                if shown() {
-                    Scale::NONE
-                } else {
-                    Scale::uniform(0.1)
-                }
-            })
-            .transition(springy()),
-        )
         .child(shape)
 }
 

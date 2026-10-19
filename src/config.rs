@@ -383,8 +383,8 @@ pub fn color(c: HexColor) -> Color {
     )
 }
 
-/// The island's resting place. ashell reads the same `[island.seed]`, so the
-/// dot both processes draw across the compositor's cut is the same dot.
+/// The island's resting place. ashell reads the same `[island.seed]`; the
+/// two need not match, since neither island is on screen at the cut.
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(default)]
 pub struct IslandConfig {
@@ -409,14 +409,14 @@ impl Default for SeedConfig {
     }
 }
 
-/// Coordination with a bar that folds its island into the seed before the
-/// lock takes the screen, over `org.ashell.Island1`. Optional: without a bar
+/// Coordination with a bar that sends its island up past the top edge
+/// before the lock takes the screen, over `org.ashell.Island1`. Optional: without a bar
 /// allock locks at once.
 #[derive(Deserialize, Clone, Copy, Debug)]
 #[serde(default)]
 pub struct HandoffConfig {
     pub enabled: bool,
-    /// How long the bar has to fold before the session is locked anyway.
+    /// How long the bar has to go before the session is locked anyway.
     pub timeout_ms: u64,
 }
 

@@ -8,9 +8,9 @@
 //! From the seed it opens straight into the card, with the reader listening,
 //! so a finger unlocks at once; only idleness folds it up into the rest.
 //!
-//! It starts and ends as the seed, the dot a bar folds its own island into,
-//! so the compositor's cut between the two processes falls under one dot that
-//! does not move.
+//! It starts and ends as the seed, up past the output's top edge, where a
+//! bar's island goes before the lock and comes back from after it: at the
+//! compositor's cut between the two processes neither is on screen.
 
 use std::time::Duration;
 
@@ -20,7 +20,7 @@ use crate::services::auth::Auth;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
-    /// The dot. The first frame, and the last.
+    /// The dot, up past the top edge. The first frame, and the last.
     Seed,
     /// The small island at the top: clock, battery, "type to unlock".
     Rest,
@@ -28,16 +28,16 @@ pub enum Phase {
     Awake,
     /// Accepted: the tick, before folding away.
     Ok,
-    /// Folded back into the seed; the caller hands over.
+    /// Gone back up as the seed; the caller hands over.
     Gone,
 }
 
-/// How long the seed is held before it grows: the first frame has to reach
-/// the screen before anything moves.
-const GROW_MS: u64 = 350;
+/// How long before the island drops in: the first frame has to reach the
+/// screen before anything moves.
+const GROW_MS: u64 = 150;
 /// The tick is seen before the island folds.
 const OK_MS: u64 = 600;
-/// The fold into the seed, before the handover.
+/// The island going up into the edge, before the handover.
 pub const FOLD_MS: u64 = 650;
 /// The same, when the background sharpens back into what comes next as well.
 pub const SHARPEN_MS: u64 = 1100;
@@ -61,7 +61,7 @@ pub struct Flow {
 }
 
 impl Flow {
-    /// Starts as the seed, and folds back into it once `auth` accepts; `gone`
+    /// Starts as the seed, and goes back up as it once `auth` accepts; `gone`
     /// runs `fold_ms` later. [`grow`](Self::grow) says when it may grow.
     pub fn start(auth: Auth, fold_ms: u64, gone: impl Fn() + 'static) -> Self {
         let flow = Self {
@@ -109,7 +109,7 @@ impl Flow {
         flow
     }
 
-    /// The seed is on screen: open into the card once it has been seen.
+    /// The first frame is on screen: drop in and open into the card.
     pub fn grow(&self) {
         let phase = self.phase;
         set_timeout(Duration::from_millis(GROW_MS), move || {

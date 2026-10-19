@@ -58,8 +58,8 @@ allock works without a config file. To change it, copy
 [`config.example.toml`](config.example.toml) to `~/.config/allock/config.toml`:
 every key is optional and shown with its default.
 
-The layout is fixed. The config chooses colours, wallpaper, clock format, the
-seed's size and place, which indicators appear and which monitors show the
+The layout is fixed. The config chooses colours, wallpaper, clock format, where
+the island rests, which indicators appear and which monitors show the
 controls.
 
 ## 🔑 Authentication
@@ -112,32 +112,31 @@ The greeter's own options go in `/etc/greetd/allock.toml` under `[greeter]`.
 
 ## 🏝️ The island and the handoff
 
-The island has one smallest state, the **seed**: a dot of `[island.seed] size`
-pixels, `top` pixels from the top edge. Everything starts and ends there. When
+The island comes in from the top edge of the output and leaves into it. When
 the lock takes the screen the compositor cuts from the session to the lock
-surface, and no client can animate that cut; when the dot is in the same place
-on both sides, the one thing the eye follows does not move.
+surface, and no client can animate that cut; when nothing is on screen at the
+cut but the background, there is nothing for the eye to see jump.
 
-Before locking, allock asks the bar to fold its island into the seed over
-D-Bus (`org.ashell.Island1.PrepareHandoff("lock")` on the session bus), draws
-the seed in its first frame, and grows it. Unlocking does the reverse: the card
-folds into the seed, the session comes back with the bar still a seed, and
-`ResumeAfterHandoff()` lets it grow. logind's `LockedHint` is kept too, so a bar
-restarted mid-lock knows to wait as the seed.
+Before locking, allock asks the bar to send its island up past the top edge
+over D-Bus (`org.ashell.Island1.PrepareHandoff("lock")` on the session bus),
+locks, and drops its own island in from the same edge. Unlocking does the
+reverse: the card goes up into the edge, the session comes back with the bar's
+island still away, and `ResumeAfterHandoff()` lets it drop back in. logind's
+`LockedHint` is kept too, so a bar restarted mid-lock knows to stay away.
 
 The background is the only thing the compositor still cuts. With
-`[background] source = "Snapshot"` not even that: once the bar is the seed,
-allock takes a picture of every output through `wlr-screencopy`, starts the
-lock on it sharp and blurs it, and sharpens it again under the seed before
-handing back. The pictures stay in memory and are never written anywhere; an
-output that cannot be captured, or a compositor that takes longer than half a
-second, gets the wallpaper.
+`[background] source = "Snapshot"` not even that: once the bar's island is
+gone, allock takes a picture of every output through `wlr-screencopy`, starts
+the lock on it sharp and blurs it, and sharpens it again once its own island
+has gone, before handing back. The picture has no island in it to blur. It
+stays in memory and is never written anywhere; an output that cannot be
+captured, or a compositor that takes longer than half a second, gets the
+wallpaper.
 
-The handoff is optional: without a bar allock locks at once, and the island
-pops out of nothing and shrinks away at the end instead of starting and ending
-as a lone dot. A bar that does not answer within `[handoff] timeout_ms` is not
-waited for. [docs/HANDOFF.md](docs/HANDOFF.md) has the interface a bar
-implements. Nothing but
-"fold" and "resume" goes over it. The greeter does the same on its side of the
-compositor switch: it folds into the seed over the wallpaper, sharpened, which
-is the picture the session starts on.
+The handoff is optional: without a bar allock locks at once, and its island
+comes and goes the same way. A bar that does not answer within
+`[handoff] timeout_ms` is not waited for. [docs/HANDOFF.md](docs/HANDOFF.md)
+has the interface a bar implements. Nothing but "go" and "come back" goes over
+it. The greeter does the same on its side of the compositor switch: its island
+goes up into the edge over the wallpaper, sharpened, which is the picture the
+session starts on, and the session's bar drops in from there.

@@ -1,21 +1,20 @@
 //! The handoff with ashell, over `org.ashell.Island1` on the session bus.
 //!
-//! Before the lock takes the screen, ashell folds its island into the seed,
-//! so the compositor's cut falls under a dot both processes draw in the same
-//! place; after the unlock, it grows back. See `docs/HANDOFF.md`.
+//! Before the lock takes the screen, ashell's island goes up past the top
+//! edge, so the session the lock covers (and the snapshot it takes of it)
+//! has no island in it; the lock's own island then drops in from the same
+//! edge. After the unlock, ashell's drops back in. See `docs/HANDOFF.md`.
 //!
-//! Optional on purpose. Without ashell on the bus nothing is waited for and
-//! the island arrives and leaves on its own (see [`Handoff::bar`]); a bar
-//! that is slow or stuck costs at most `timeout_ms` before the session is
-//! locked anyway. The protocol carries "fold" and "resume", never a
+//! Optional on purpose. Without ashell on the bus nothing is waited for; a
+//! bar that is slow or stuck costs at most `timeout_ms` before the session
+//! is locked anyway. The protocol carries "go" and "come back", never a
 //! credential or a verdict.
 //!
 //! logind's `LockedHint` is kept as well, so a bar that starts or restarts
-//! mid-lock knows to come up as the seed.
+//! mid-lock knows to stay away until the unlock.
 
 use std::time::Duration;
 
-use futures::StreamExt;
 use guido::prelude::*;
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
@@ -31,7 +30,7 @@ const ISLAND: &str = "org.ashell.Island";
     default_path = "/org/ashell/Island"
 )]
 trait Island {
-    /// Folds the island into the seed; answers once it is the seed.
+    /// Sends the island up past the top edge; answers once it is gone.
     fn prepare_handoff(&self, reason: &str) -> zbus::Result<bool>;
     /// The lock is gone: the island may grow back.
     fn resume_after_handoff(&self) -> zbus::Result<()>;
@@ -48,7 +47,7 @@ trait Session {
 
 #[derive(Debug)]
 enum Command {
-    /// Fold the bar, then say `ready`.
+    /// Send the bar away, then say `ready`.
     Prepare,
     /// The lock is held: tell logind.
     Locked,
@@ -59,22 +58,17 @@ enum Command {
 #[derive(Clone, Copy)]
 pub struct Handoff {
     service: Service<Command>,
-    /// The bar is the seed, or will never answer: the lock may be drawn.
+    /// The bar is gone, or will never answer: the lock may be drawn.
     pub ready: Signal<bool>,
     /// The bar has been told it may grow back: the process may end.
     pub resumed: Signal<bool>,
-    /// A bar is on the bus to take the seed from the lock and give it back.
-    /// Without one the island has nobody to hand over to, so it arrives and
-    /// leaves by itself instead of as a dot.
-    pub bar: Signal<bool>,
 }
 
 impl Handoff {
     pub fn start(config: HandoffConfig) -> Self {
         let ready = create_signal(false);
         let resumed = create_signal(false);
-        let bar = create_signal(false);
-        let (ready_w, resumed_w, bar_w) = (ready.writer(), resumed.writer(), bar.writer());
+        let (ready_w, resumed_w) = (ready.writer(), resumed.writer());
         let timeout = Duration::from_millis(config.timeout_ms);
 
         let service = create_service::<Command, _, _>(move |mut rx, _ctx| async move {
@@ -86,26 +80,11 @@ impl Handoff {
             } else {
                 None
             };
-            // Who holds the name, now and on every change: ashell may come or
-            // go while the lock is up.
-            if let Some(bus) = bus.clone() {
-                tokio::spawn(async move {
-                    if let Err(e) = watch_bar(&bus, |present| bar_w.set(present)).await {
-                        log::info!("not watching for the bar: {e}");
-                    }
-                });
-            }
             while let Some(command) = rx.recv().await {
                 match command {
                     Command::Prepare => {
                         if let Some(bus) = &bus {
-                            // Before the lock draws its first frame, whatever
-                            // the watch has heard by then.
-                            if let Ok(Ok(present)) = tokio::time::timeout(timeout, owned(bus)).await
-                            {
-                                bar_w.set(present);
-                            }
-                            within(timeout, "fold", prepare(bus)).await;
+                            within(timeout, "send away", prepare(bus)).await;
                         }
                         ready_w.set(true);
                     }
@@ -125,7 +104,6 @@ impl Handoff {
             service,
             ready: ready.read_only(),
             resumed: resumed.read_only(),
-            bar: bar.read_only(),
         }
     }
 
@@ -150,21 +128,6 @@ async fn within(timeout: Duration, what: &str, call: impl Future<Output = zbus::
     }
 }
 
-/// Subscribes before asking, so a bar that appears in between is not missed.
-async fn watch_bar(bus: &zbus::Connection, mut seen: impl FnMut(bool)) -> zbus::Result<()> {
-    let dbus = DBusProxy::new(bus).await?;
-    let mut changes = dbus
-        .receive_name_owner_changed_with_args(&[(0, ISLAND)])
-        .await?;
-    seen(dbus.name_has_owner(BusName::try_from(ISLAND)?).await?);
-    while let Some(change) = changes.next().await {
-        if let Ok(args) = change.args() {
-            seen(args.new_owner().is_some());
-        }
-    }
-    Ok(())
-}
-
 async fn owned(bus: &zbus::Connection) -> zbus::Result<bool> {
     DBusProxy::new(bus)
         .await?
@@ -180,7 +143,7 @@ async fn prepare(bus: &zbus::Connection) -> zbus::Result<()> {
         return Ok(());
     }
     if !IslandProxy::new(bus).await?.prepare_handoff("lock").await? {
-        log::info!("the bar declined to fold; locking anyway");
+        log::info!("the bar declined to go; locking anyway");
     }
     Ok(())
 }

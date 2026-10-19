@@ -42,16 +42,15 @@ idle_timeout = 60
 [indicators]
 battery = true
 
-# The seed: the dot the island starts and ends as. A bar that hands over to
-# allock (ashell) reads the same values, so both draw the dot in one place.
+# The seed: the dot the island starts and ends as, up past the top edge, and
+# where it rests. Shared keys with ashell, though they need not match.
 [island.seed]
 size = 30.0   # diameter, logical pixels
 top = 6.0     # from the top edge, logical pixels
 
-# Before locking, ask the bar to fold its island into the seed, over
-# org.ashell.Island1 (docs/HANDOFF.md). Without a bar allock locks at once and
-# the island arrives and leaves by itself; a bar that does not answer within
-# timeout_ms is not waited for.
+# Before locking, ask the bar to send its island up past the top edge, over
+# org.ashell.Island1 (docs/HANDOFF.md). Without a bar allock locks at once; a
+# bar that does not answer within timeout_ms is not waited for.
 [handoff]
 enabled = true
 timeout_ms = 600
@@ -67,8 +66,7 @@ success_color = "#a6e3a1"
 warning_color = "#f9e2af"
 danger_color = "#f38ba8"
 # How much of island_color is painted, 0.0 to 1.0, as ashell's opacity; a
-# colour's own alpha (#rrggbbaa) multiplies with it. Give ashell's bar the same
-# value, or the seed changes across the handoff.
+# colour's own alpha (#rrggbbaa) multiplies with it.
 opacity = 1.0
 # Whether what is behind a translucent island softens: "auto" (when opacity is
 # below 1), "always" or "never".
