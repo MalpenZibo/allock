@@ -26,7 +26,7 @@ futures = "0.3"
 
 # Config
 serde = { version = "1", features = ["derive"] }
-toml = "0.9"
+toml = "1"
 hex_color = { version = "3", features = ["serde"] }
 serde_json = "1"
 
@@ -36,7 +36,7 @@ serde_json = "1"
 pam-client2 = { version = "0.5", default-features = false }
 # GPL-3.0-only, from the greetd author. Compatible with this crate's licence.
 greetd_ipc = { version = "0.10", features = ["tokio-codec"] }
-zbus = { version = "5", default-features = false, features = ["tokio"] }
+zbus = { version = "6", default-features = false, features = ["tokio"] }
 # Wiping the buffer a password is written to greetd from.
 zeroize = "1"
 # ext-idle-notify, to rest the fingerprint reader. The versions guido uses.

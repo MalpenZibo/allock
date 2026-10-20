@@ -13,7 +13,7 @@ use futures::stream::BoxStream;
 use guido::prelude::WriteSignal;
 use tokio::sync::{mpsc, watch};
 use zbus::proxy;
-use zbus::zvariant::OwnedObjectPath;
+use zbus::OwnedObjectPath;
 
 use super::{AuthEvent, FingerprintConfig, FingerprintState};
 
@@ -267,7 +267,7 @@ async fn verify_loop(
     let device_path = manager.get_default_device().await?;
 
     let device: FprintDeviceProxy<'static> = FprintDeviceProxy::builder(connection)
-        .path(device_path)?
+        .path(device_path)
         .build()
         .await?;
 
