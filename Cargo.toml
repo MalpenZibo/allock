@@ -17,7 +17,7 @@ guido = { git = "https://github.com/MalpenZibo/guido", branch = "main" }
 # feat/experimental-ui branch for now; a git dependency once it is pushed.
 ashell-ui = { path = "../ashell/experimental/crates/ashell-ui" }
 # Battery, shared with ashell.
-ashell-services = { git = "https://github.com/MalpenZibo/ashell", branch = "refactor/upower-ashell-services", features = ["upower"] }
+ashell-services = { git = "https://github.com/MalpenZibo/ashell", branch = "main", features = ["upower"] }
 
 # UI / runtime
 chrono = { version = "0.4", default-features = false, features = ["clock", "unstable-locales"] }

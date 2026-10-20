@@ -142,7 +142,7 @@ dependencies = [
 [[package]]
 name = "ashell-services"
 version = "0.11.0"
-source = "git+https://github.com/MalpenZibo/ashell?branch=refactor%2Fupower-ashell-services#a11b8e57b7846821a1b148cebcc6953ad1570e53"
+source = "git+https://github.com/MalpenZibo/ashell?branch=main#4efea2ddb613a7f162c9a80d6de14d4512096efc"
 dependencies = [
  "anyhow",
  "futures",
