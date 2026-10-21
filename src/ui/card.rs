@@ -13,16 +13,16 @@ use crate::services::auth::{FingerprintState, Lock, NoticeLevel, Tally};
 use crate::services::battery::Battery;
 use crate::services::power::PowerAction;
 use crate::system::user::UserInfo;
-use ashell_ui::badge::dot;
-use ashell_ui::button::chip_button;
-use ashell_ui::chip::{Chip, chip};
-use ashell_ui::control::Size;
-use ashell_ui::motion::{self, armed};
-use ashell_ui::progress::{battery_ink, ring};
-use ashell_ui::text::{caption, heading, typed};
-use ashell_ui::tokens::{IconSize, icon as icon_box, radius, size, stroke};
-use ashell_ui::typography as ty;
-use ashell_ui::{Icon, centered_row, icon, list, roll, ui};
+use ashell_ds::badge::dot;
+use ashell_ds::button::chip_button;
+use ashell_ds::chip::{Chip, chip};
+use ashell_ds::control::Size;
+use ashell_ds::motion::{self, armed};
+use ashell_ds::progress::{battery_ink, ring};
+use ashell_ds::text::{caption, heading, typed};
+use ashell_ds::tokens::{IconSize, icon as icon_box, radius, size, stroke};
+use ashell_ds::typography as ty;
+use ashell_ds::{Icon, centered_row, icon, list, roll, ui};
 
 const WIDTH: f32 = 400.0;
 /// The avatar, and how far the fingerprint ring stands off it.

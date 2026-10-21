@@ -26,7 +26,7 @@ use crate::services::battery::Battery;
 use crate::services::power::Power;
 use crate::services::snapshot::Snapshot;
 use crate::system::user::UserInfo;
-use ashell_ui::Ui;
+use ashell_ds::Ui;
 use flow::{Flow, Phase};
 
 pub type Snapshots = std::sync::Arc<std::collections::HashMap<String, Snapshot>>;
@@ -35,7 +35,7 @@ pub type Snapshots = std::sync::Arc<std::collections::HashMap<String, Snapshot>>
 #[derive(Clone)]
 pub struct Screen {
     pub config: Rc<Config>,
-    /// What ashell-ui's components read.
+    /// What ashell-ds's components read.
     pub ui: Ui,
     /// The picture at `background.path`, resolved once; `None` when unset
     /// or unreadable.
@@ -70,8 +70,8 @@ impl Screen {
 }
 
 pub fn view(screen: Screen, output: OutputInfo) -> Container {
-    // ashell-ui's components read it from here.
-    ashell_ui::provide_ui(screen.ui);
+    // ashell-ds's components read it from here.
+    ashell_ds::provide_ui(screen.ui);
     let controls = shows_controls(&screen, output.id);
     let height = create_signal(0.0f32);
     let root_ref = create_widget_ref();

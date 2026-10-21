@@ -163,8 +163,11 @@ if [[ $GREETER -eq 1 ]]; then
     APPEARANCE_BLOCK="$(toml_table appearance "$USER_CONFIG")"
     if [[ -n "$APPEARANCE_BLOCK" ]]; then
         echo "    look: [appearance] from $USER_CONFIG"
+        if grep -qE '^[[:space:]]*wallpaper[[:space:]]*=' <<<"$APPEARANCE_BLOCK"; then
+            echo "    note: the greeter cannot read appearance.wallpaper in your home; it falls back to the theme"
+        fi
     else
-        echo "    no [appearance] in $USER_CONFIG; the greeter wears ashell-ui's default look"
+        echo "    no [appearance] in $USER_CONFIG; the greeter wears ashell-ds's default look"
     fi
 
     MAIN_OUTPUT_LINE="$(toml_line main_output "$USER_CONFIG")"

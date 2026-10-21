@@ -95,5 +95,5 @@ island on either side of it.
 | Value | Where |
 |---|---|
 | Where each island rests, and the seed it goes as | `[island.seed]` in each one's config (same keys, same defaults: 30 and 6; they need not match) |
-| The spring every fold and growth uses | `ashell_ui::motion::ISLAND_SPRING` (mass 1, stiffness 230, damping 21) |
+| The spring every fold and growth uses | `ashell_ds::motion::ISLAND_SPRING` (mass 1, stiffness 230, damping 21) |
 | How long going away takes | ~400 ms, from that spring |

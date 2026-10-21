@@ -10,11 +10,11 @@ use guido::prelude::*;
 use super::Screen;
 use super::flow::Phase;
 use crate::Mode;
-use ashell_ui::button::{Fill, icon_button};
-use ashell_ui::control::Size;
-use ashell_ui::input::password_field;
-use ashell_ui::typography::{LABEL_LARGE, Typeset};
-use ashell_ui::{Icon, ui};
+use ashell_ds::button::{Fill, icon_button};
+use ashell_ds::control::Size;
+use ashell_ds::input::password_field;
+use ashell_ds::typography::{LABEL_LARGE, Typeset};
+use ashell_ds::{Icon, ui};
 
 /// The input the keyboard types into, kept out of sight.
 pub fn keyboard(screen: &Screen) -> Container {

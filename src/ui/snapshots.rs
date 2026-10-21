@@ -290,7 +290,7 @@ fn snapshots() {
 
     // A translucent island softens the session through it.
     let mut glass = Scene::with(Mode::Lock, snapshots, |config| {
-        config.appearance.material = ashell_ui::ui::Material::Glass;
+        config.appearance.material = ashell_ds::ui::Material::Glass;
     })
     .unwrap();
     glass.save("translucent-0-seed");

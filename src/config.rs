@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use ashell_ui::config::UiConfig;
+use ashell_ds::config::UiConfig;
 use serde::Deserialize;
 
 /// Everything but `log_level`, which [`log_level`] reads before the logger
@@ -21,7 +21,7 @@ pub struct Config {
     pub auth: AuthConfig,
     pub indicators: IndicatorsConfig,
     pub greeter: GreeterConfig,
-    /// ashell-ui's own `[appearance]` table, read as ashell reads it.
+    /// ashell-ds's own `[appearance]` table, read as ashell reads it.
     pub appearance: UiConfig,
     pub island: IslandConfig,
     pub handoff: HandoffConfig,
@@ -449,7 +449,7 @@ mod tests {
         let example: Config = toml::from_str(include_str!("../config.example.toml")).unwrap();
         assert_eq!(
             example.appearance.ui(None),
-            ashell_ui::config::UiConfig::default().ui(None)
+            ashell_ds::config::UiConfig::default().ui(None)
         );
         let (seed, default) = (example.island.seed, SeedConfig::default());
         assert_eq!((seed.size, seed.top), (default.size, default.top));

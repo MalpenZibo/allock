@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use guido::prelude::*;
 use guido::widget_prelude::*;
 
-use ashell_ui::ui::Motion;
+use ashell_ds::ui::Motion;
 
 /// The check's corners in Lucide's 24-unit box, in the order it is drawn.
 const POINTS: [(f32, f32); 3] = [(20.0, 6.0), (9.0, 17.0), (4.0, 12.0)];
@@ -26,7 +26,7 @@ struct Tick {
 
 pub fn tick(size: f32, stroke: f32, color: Color) -> impl Widget {
     // Without full motion it is there at once, already drawn.
-    if ashell_ui::ui().motion != Motion::Full {
+    if ashell_ds::ui().motion != Motion::Full {
         return Tick {
             size,
             stroke,

@@ -13,9 +13,10 @@ path = "src/main.rs"
 [dependencies]
 # The island needs main: group blur, arcs, tabular figures, inset shadows.
 guido = { git = "https://github.com/MalpenZibo/guido", branch = "main" }
-# The island's components, shared with ashell. Only on ashell's local
+# ashell's design system: tokens, themes, components and the [appearance]
+# table, with themes made from a seed or a wallpaper. Only on ashell's local
 # feat/experimental-ui branch for now; a git dependency once it is pushed.
-ashell-ui = { path = "../ashell/experimental/crates/ashell-ui", features = ["serde"] }
+ashell-ds = { path = "../ashell/experimental/ashell-ds", features = ["serde", "wallpaper"] }
 # Battery, shared with ashell.
 ashell-services = { git = "https://github.com/MalpenZibo/ashell", branch = "main", features = ["upower"] }
 

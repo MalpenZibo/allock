@@ -1,15 +1,15 @@
-//! The island: ashell-ui's shape, at the top centre, showing the seed, the
+//! The island: ashell-ds's shape, at the top centre, showing the seed, the
 //! rest, the card or the tick, and coming down to meet whoever types.
 
 use guido::prelude::*;
 
 use super::flow::Phase;
 use super::{Screen, card, rest};
-use ashell_ui::control::Size;
-use ashell_ui::island::{self, above_edge, island};
-use ashell_ui::motion::{self, shake};
-use ashell_ui::tokens::{icon as icon_box, radius, size, stroke};
-use ashell_ui::ui;
+use ashell_ds::control::Size;
+use ashell_ds::island::{self, above_edge, island};
+use ashell_ds::motion::{self, shake};
+use ashell_ds::tokens::{icon as icon_box, radius, size, stroke};
+use ashell_ds::ui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum View {

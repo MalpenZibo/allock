@@ -56,18 +56,31 @@ enabled = true
 timeout_ms = 600
 
 [appearance]
-# ashell-ui's own [appearance] table (its UiConfig), read as ashell reads it.
-# Unset, it is ashell-ui's default look.
-# One of "Tokyo Night", "Catppuccin", "Nord", "Gruvbox", "Dracula",
-# "Rosé Pine", "Everforest", "Kanagawa".
-theme = "Tokyo Night"
-# "auto", "dark" or "light": which flavour shows. A lock comes up before it
-# could ask the desktop, so "auto" shows the dark one.
-mode = "auto"
-# The flavour of each kind and the accent, by name; the theme's own when unset.
+# ashell-ds's own [appearance] table (its UiConfig), read as ashell reads it.
+# Unset, it is ashell-ds's default look: Tokyo Night.
+
+# Where the colours come from: one of a theme, a seed colour or a wallpaper.
+# A theme: "Tokyo Night", "Catppuccin", "Nord", "Gruvbox", "Dracula",
+# "Rosé Pine", "Everforest" or "Kanagawa", with its flavours and accent by
+# name, the theme's own when unset.
+# theme = "Tokyo Night"
 # dark_flavor = "Storm"
 # light_flavor = "Day"
 # accent = "Blue"
+# Or both flavours worked out from one colour, as Material You does...
+# seed = "#6750a4"
+# ...or from the colour that fits a picture best. It is read as the lock
+# starts, so a large picture makes it start later.
+# wallpaper = "~/Pictures/wallpaper.jpg"
+# How a seed or a wallpaper spreads: "tonal-spot", "vibrant", "expressive",
+# "content", "fidelity", "neutral", "monochrome", "rainbow", "fruit-salad";
+# and how far apart its tones are: "standard", "medium", "high".
+# variant = "tonal-spot"
+# contrast = "standard"
+
+# "auto", "dark" or "light": which flavour shows. A lock comes up before it
+# could ask the desktop, so "auto" shows the dark one.
+mode = "auto"
 # "compact", "default" or "comfortable": type, controls and space move a step.
 density = "default"
 # "square", "soft" or "round": corners move a step; pills stay pills.
@@ -82,11 +95,13 @@ motion = "full"
 # sans = "Inter"
 # mono = "JetBrains Mono"
 
-# Colours of ashell-ui's scheme set over the theme's: background (the island),
-# text, sub, dim, accent, success, warning, danger, and on_accent, on_success,
-# on_warning, on_danger for what reads on each fill.
-# [appearance.colors]
+# Colours set over each flavour, by ashell-ds's names: background (the
+# island), text, sub, dim, accent, success, warning, danger, and on_accent,
+# on_success, on_warning, on_danger for what reads on each fill.
+# [appearance.dark]
 # accent = "#7aa2f7"
+# [appearance.light]
+# accent = "#2e7de9"
 
 # Greeter only (allock --greeter).
 [greeter]
