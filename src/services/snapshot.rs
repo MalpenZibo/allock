@@ -38,34 +38,52 @@ impl PartialEq for Snapshot {
     }
 }
 
-/// Every output that could be captured, by connector name, or nothing once
-/// `timeout` has passed: a lock is never held back for a picture.
-pub async fn capture(timeout: Duration) -> HashMap<String, Snapshot> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let spawned = std::thread::Builder::new()
+/// A capture made ready: connected, with the outputs found, waiting for
+/// [`capture`](Self::capture) to take the picture.
+pub struct Pending {
+    go: std::sync::mpsc::Sender<()>,
+    done: tokio::sync::oneshot::Receiver<anyhow::Result<HashMap<String, Snapshot>>>,
+}
+
+/// Connects and finds the outputs now, while the lock still waits on the
+/// bar, so only the capture itself is left for later.
+pub fn prepare() -> Option<Pending> {
+    let (go, wait) = std::sync::mpsc::channel();
+    let (tx, done) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
         .name("allock-snapshot".to_owned())
         .spawn(move || {
-            let _ = tx.send(capture_blocking());
-        });
-    if let Err(e) = spawned {
-        log::info!("no snapshot: {e}");
-        return HashMap::new();
-    }
-    match tokio::time::timeout(timeout, rx).await {
-        Ok(Ok(Ok(snapshots))) => snapshots,
-        Ok(Ok(Err(e))) => {
-            log::info!("no snapshot: {e}");
-            HashMap::new()
-        }
-        Ok(Err(_)) => HashMap::new(),
-        Err(_) => {
-            log::info!("no snapshot: the compositor took longer than {timeout:?}");
-            HashMap::new()
+            let _ = tx.send(capture_blocking(wait));
+        })
+        .inspect_err(|e| log::info!("no snapshot: {e}"))
+        .ok()?;
+    Some(Pending { go, done })
+}
+
+impl Pending {
+    /// Every output that could be captured, by connector name, or nothing
+    /// once `timeout` has passed: a lock is never held back for a picture.
+    pub async fn capture(self, timeout: Duration) -> HashMap<String, Snapshot> {
+        let _ = self.go.send(());
+        match tokio::time::timeout(timeout, self.done).await {
+            Ok(Ok(Ok(snapshots))) => snapshots,
+            Ok(Ok(Err(e))) => {
+                log::info!("no snapshot: {e}");
+                HashMap::new()
+            }
+            Ok(Err(_)) => HashMap::new(),
+            Err(_) => {
+                log::info!("no snapshot: the compositor took longer than {timeout:?}");
+                HashMap::new()
+            }
         }
     }
 }
 
-fn capture_blocking() -> anyhow::Result<HashMap<String, Snapshot>> {
+/// Dropped unused, `go` ends the thread before it captures anything.
+fn capture_blocking(
+    go: std::sync::mpsc::Receiver<()>,
+) -> anyhow::Result<HashMap<String, Snapshot>> {
     let connection = Connection::connect_to_env()?;
     let (globals, mut queue) = registry_queue_init::<Capture>(&connection)?;
     let qh = queue.handle();
@@ -89,6 +107,8 @@ fn capture_blocking() -> anyhow::Result<HashMap<String, Snapshot>> {
     };
     // The outputs' names, which wl_output v4 sends once bound.
     queue.roundtrip(&mut capture)?;
+    go.recv()
+        .map_err(|_| anyhow::anyhow!("the capture was not needed"))?;
 
     for (index, output) in outputs.iter().enumerate() {
         let frame = manager.capture_output(0, output, &qh, index);
@@ -205,7 +225,7 @@ fn to_rgba(raw: &[u8], format: Format, y_invert: bool) -> anyhow::Result<Snapsho
     for row in 0..height {
         let source = if y_invert { height - 1 - row } else { row };
         let start = source * format.stride as usize;
-        for px in raw[start..start + width * 4].chunks_exact(4) {
+        for px in raw[start..start + width * 4].as_chunks::<4>().0 {
             let (r, b) = if swap { (px[2], px[0]) } else { (px[0], px[2]) };
             pixels.extend_from_slice(&[r, px[1], b, 255]);
         }
@@ -281,28 +301,10 @@ impl Dispatch<wl_output::WlOutput, ()> for Capture {
     }
 }
 
-macro_rules! ignore_events {
-    ($($proxy:ty),* $(,)?) => {$(
-        impl Dispatch<$proxy, ()> for Capture {
-            fn event(
-                _: &mut Self,
-                _: &$proxy,
-                _: <$proxy as Proxy>::Event,
-                _: &(),
-                _: &Connection,
-                _: &QueueHandle<Self>,
-            ) {
-            }
-        }
-    )*};
-}
-
-ignore_events!(
-    wl_shm::WlShm,
-    wl_shm_pool::WlShmPool,
-    wl_buffer::WlBuffer,
-    ZwlrScreencopyManagerV1,
-);
+wayland_client::delegate_noop!(Capture: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(Capture: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(Capture: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(Capture: ignore ZwlrScreencopyManagerV1);
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Capture {
     fn event(
@@ -326,7 +328,7 @@ mod tests {
     #[ignore = "captures the running session"]
     async fn captures_every_output() {
         let start = std::time::Instant::now();
-        let snapshots = capture(Duration::from_secs(2)).await;
+        let snapshots = prepare().unwrap().capture(Duration::from_secs(2)).await;
         for (name, snapshot) in &snapshots {
             println!("{name}: {}x{}", snapshot.width, snapshot.height);
             assert_eq!(

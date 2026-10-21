@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 
 use guido::prelude::Secret;
 
-use super::{AuthCommand, AuthEvent};
+use super::{AuthCommand, AuthEvent, Prompt};
 
 /// Stock policies to borrow when allock has none, best first. `login` is a
 /// last resort: its `pam_nologin` and `pam_shells` can make the screen
@@ -175,7 +175,7 @@ struct Conversation {
     replies: sync_mpsc::Receiver<Reply>,
     pending: Option<Secret>,
     /// Shown again between attempts.
-    first_prompt: Option<(bool, String)>,
+    first_prompt: Option<Prompt>,
 }
 
 impl Conversation {
@@ -192,25 +192,28 @@ impl Conversation {
     }
 
     fn show_first_prompt(&self) -> Result<(), ()> {
-        let (secret, message) = self
-            .first_prompt
-            .clone()
-            .unwrap_or_else(|| (true, "Password".to_owned()));
+        let prompt = self.first_prompt.clone().unwrap_or_else(|| Prompt {
+            secret: true,
+            message: "Password".to_owned(),
+        });
         self.events
-            .blocking_send(AuthEvent::Prompt { secret, message })
+            .blocking_send(AuthEvent::Prompt(prompt))
             .map_err(|_| ())
     }
 
     fn ask(&mut self, prompt: &CStr, secret: bool) -> Result<CString, ErrorCode> {
-        let message = prompt.to_string_lossy().into_owned();
+        let prompt = Prompt {
+            secret,
+            message: prompt.to_string_lossy().into_owned(),
+        };
 
         if let Some(answer) = self.pending.take() {
-            self.first_prompt = Some((secret, message));
+            self.first_prompt = Some(prompt);
             return CString::new(answer.expose()).map_err(|_| ErrorCode::CONV_ERR);
         }
 
         self.events
-            .blocking_send(AuthEvent::Prompt { secret, message })
+            .blocking_send(AuthEvent::Prompt(prompt))
             .map_err(|_| ErrorCode::CONV_ERR)?;
 
         match self.replies.recv() {

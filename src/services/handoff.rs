@@ -20,6 +20,7 @@ use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
 use zbus::proxy;
 
+use super::logind::{self, SessionProxy};
 use crate::config::HandoffConfig;
 
 const ISLAND: &str = "org.ashell.Island";
@@ -34,15 +35,6 @@ trait Island {
     fn prepare_handoff(&self, reason: &str) -> zbus::Result<bool>;
     /// The lock is gone: the island may grow back.
     fn resume_after_handoff(&self) -> zbus::Result<()>;
-}
-
-#[proxy(
-    interface = "org.freedesktop.login1.Session",
-    default_service = "org.freedesktop.login1",
-    default_path = "/org/freedesktop/login1/session/auto"
-)]
-trait Session {
-    fn set_locked_hint(&self, locked: bool) -> zbus::Result<()>;
 }
 
 #[derive(Debug)]
@@ -72,6 +64,10 @@ impl Handoff {
         let timeout = Duration::from_millis(config.timeout_ms);
 
         let service = create_service::<Command, _, _>(move |mut rx, _ctx| async move {
+            // Connected now, not in the middle of an unlock.
+            if let Err(e) = logind::system().await {
+                log::info!("no system bus for LockedHint: {e}");
+            }
             let bus = if config.enabled {
                 zbus::Connection::session()
                     .await
@@ -89,11 +85,14 @@ impl Handoff {
                         ready_w.set(true);
                     }
                     Command::Locked => within(timeout, "LockedHint", locked_hint(true)).await,
+                    // Independent: the exit waits on the slower, not on both.
                     Command::Resume => {
-                        within(timeout, "LockedHint", locked_hint(false)).await;
-                        if let Some(bus) = &bus {
-                            within(timeout, "resume", resume(bus)).await;
-                        }
+                        let bar = async {
+                            if let Some(bus) = &bus {
+                                within(timeout, "resume", resume(bus)).await;
+                            }
+                        };
+                        tokio::join!(within(timeout, "LockedHint", locked_hint(false)), bar);
                         resumed_w.set(true);
                     }
                 }
@@ -156,8 +155,7 @@ async fn resume(bus: &zbus::Connection) -> zbus::Result<()> {
 }
 
 async fn locked_hint(locked: bool) -> zbus::Result<()> {
-    let system = zbus::Connection::system().await?;
-    SessionProxy::new(&system)
+    SessionProxy::new(&logind::system().await?)
         .await?
         .set_locked_hint(locked)
         .await

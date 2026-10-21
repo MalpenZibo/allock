@@ -5,28 +5,28 @@ use guido::prelude::*;
 
 use super::Screen;
 use super::flow::Phase;
-use ashell_ui::motion;
-use ashell_ui::roll;
+use ashell_ui::text::typed;
+use ashell_ui::tokens::size;
+use ashell_ui::typography::{Resolved, TITLE_MEDIUM};
+use ashell_ui::ui;
+use ashell_ui::{motion, roll};
 
-const TIME: roll::Look = roll::Look {
-    size: 118.0,
-    line: 118.0,
-    weight: FontWeight::EXTRA_BOLD,
-    spacing: -4.0,
-};
+/// The time's size and line, and how close its figures sit: past the type
+/// scale, which stops at the island's numbers.
+const TIME_SIZE: f32 = 118.0;
+const TIME_TRACKING: f32 = -4.0;
 const AWAKE_SCALE: f32 = 0.56;
 /// The clock's centre, as a share of the output's height.
 const REST_AT: f32 = 0.30;
 const AWAKE_AT: f32 = 0.17;
 
 pub fn view(screen: &Screen, height: Signal<f32>) -> Container {
-    let theme = screen.theme;
-    let phase = screen.flow.phase;
+    let flow = screen.flow;
+    let phase = flow.phase;
     let now = screen.now;
-    let time_format = screen.config.clock.time_format.clone();
+    let time = screen.time;
     let date_format = screen.config.clock.date_format.clone();
 
-    let time = create_memo(move || now.get().format(&time_format).to_string());
     let date = create_memo(move || {
         // Collapse the padding `%e` leaves on single-digit days.
         now.get()
@@ -34,7 +34,7 @@ pub fn view(screen: &Screen, height: Signal<f32>) -> Container {
             .to_string()
             .replace("  ", " ")
     });
-    let awake = create_memo(move || matches!(phase.get(), Phase::Awake | Phase::Ok));
+    let awake = create_memo(move || flow.is_down());
     let shown = create_memo(move || matches!(phase.get(), Phase::Rest | Phase::Awake | Phase::Ok));
     let clock_ref = create_widget_ref();
 
@@ -50,7 +50,7 @@ pub fn view(screen: &Screen, height: Signal<f32>) -> Container {
         .align_self(Alignment::TOP_CENTER)
         .layout(
             Flex::column()
-                .spacing(10.0)
+                .spacing(size::S2.px())
                 .cross_alignment(CrossAlignment::Center),
         )
         .translate(place.transition(springy()))
@@ -58,17 +58,25 @@ pub fn view(screen: &Screen, height: Signal<f32>) -> Container {
             (move || Scale::uniform(if awake.get() { AWAKE_SCALE } else { 1.0 }))
                 .transition(springy()),
         )
-        .opacity((move || if shown.get() { 1.0 } else { 0.0 }).transition(400.0))
-        .child(roll::rolling(time, TIME, move || {
-            Color::WHITE.with_alpha(if awake.get() { 0.92 } else { 0.6 })
-        }))
+        .opacity((move || if shown.get() { 1.0 } else { 0.0 }).transition(motion::easing(400.0)))
+        .child(
+            roll::rolling(time)
+                .look(Resolved {
+                    size: TIME_SIZE,
+                    line: TIME_SIZE,
+                    weight: FontWeight::EXTRA_BOLD,
+                    tracking: TIME_TRACKING,
+                    family: ui().fonts.sans,
+                    tabular: true,
+                })
+                .color(move || Color::WHITE.with_alpha(if awake.get() { 0.92 } else { 0.6 })),
+        )
         .child(move || {
             let date = date.get();
             (!date.is_empty()).then(|| {
-                text(date)
-                    .font_size(20.0)
-                    .font_weight(FontWeight::SEMI_BOLD)
-                    .color(theme.colors.text.with_alpha(0.7))
+                // On the wallpaper, as the time is: white whatever the theme.
+                typed(date, TITLE_MEDIUM.em())
+                    .color(Color::WHITE.with_alpha(0.7))
                     .nowrap()
             })
         })

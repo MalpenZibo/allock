@@ -10,8 +10,11 @@ use guido::prelude::*;
 use super::Screen;
 use super::flow::Phase;
 use crate::Mode;
-use ashell_ui::button::{Fill, Size, icon_button, pressable};
-use ashell_ui::{Icon, icon};
+use ashell_ui::button::{Fill, icon_button};
+use ashell_ui::control::Size;
+use ashell_ui::input::password_field;
+use ashell_ui::typography::{LABEL_LARGE, Typeset};
+use ashell_ui::{Icon, ui};
 
 /// The input the keyboard types into, kept out of sight.
 pub fn keyboard(screen: &Screen) -> Container {
@@ -78,8 +81,8 @@ pub fn keyboard(screen: &Screen) -> Container {
 
 /// What the keyboard typed, drawn: dots, the password itself when revealed,
 /// or the account name.
-pub fn view(screen: &Screen) -> Container {
-    let theme = screen.theme;
+pub fn view(screen: &Screen) -> impl Widget + use<> {
+    let t = ui();
     let auth = screen.auth;
     let state = auth.state;
     let flow = screen.flow;
@@ -114,62 +117,45 @@ pub fn view(screen: &Screen) -> Container {
         },
         _ => "Password".to_owned(),
     });
-    let failed = create_memo(move || {
-        state.field_is_empty()
-            && matches!(state.notice.get(), Some(n) if n.level == crate::services::auth::NoticeLevel::Error)
-    });
+    let failed = create_memo(move || state.refused());
 
-    let typed = move || {
-        let shown = shown.get();
-        let empty = shown.is_empty();
+    // One text whose content, spacing and colour follow what is typed, not
+    // a new one per key.
+    let empty = create_memo(move || shown.with(String::is_empty));
+    let typed = text(move || {
+        if empty.get() {
+            placeholder.get()
+        } else {
+            shown.get()
+        }
+    })
+    .typeset(LABEL_LARGE)
+    .letter_spacing(move || {
         let masked = secret.get() && !flow.reveal.get();
-        text(if empty { placeholder.get() } else { shown })
-            .font_size(15.0)
-            .line_height(LineHeight::Absolute(20.0))
-            .letter_spacing(if masked && !empty { 1.8 } else { 0.0 })
-            .color(if empty {
-                theme.colors.dim
-            } else {
-                theme.colors.text
-            })
-            .nowrap()
-            .overflow(TextOverflow::Ellipsis)
-    };
+        if masked && !empty.get() { 1.8 } else { 0.0 }
+    })
+    .color(move || {
+        if empty.get() {
+            t.colors.dim
+        } else {
+            t.colors.text
+        }
+    })
+    .nowrap()
+    .overflow(TextOverflow::Ellipsis);
 
-    container()
-        .width(fill())
-        .height(46.0)
-        .corners(23.0)
-        .background(theme.colors.surface)
-        .shadow(
-            (move || {
-                let ring = if failed.get() {
-                    theme.colors.danger
-                } else {
-                    theme.colors.accent.with_alpha(0.7)
-                };
-                Shadow::new((0.0, 0.0), 0.0, 1.5, ring).inset()
-            })
-            .transition(250.0),
-        )
-        .opacity((move || if state.busy.get() { 0.45 } else { 1.0 }).transition(200.0))
-        .padding(Padding {
-            top: 0.0,
-            right: 6.0,
-            bottom: 0.0,
-            left: 18.0,
-        })
-        .layout(
-            Flex::row()
-                .spacing(6.0)
-                .cross_alignment(CrossAlignment::Center),
-        )
+    // A stray click on submit sends nothing: `submit` declines an empty
+    // answer, which would count against `pam_faillock`.
+    password_field()
+        .refused(failed)
+        .busy(state.busy)
+        .held(state.busy)
+        .on_submit(move || auth.submit())
+        .extra(container().child(move || secret.get().then(|| reveal(flow))))
         .child(container().width(fill()).child(typed))
-        .child(move || secret.get().then(|| reveal(flow)))
-        .child(go(screen))
 }
 
-fn reveal(flow: super::flow::Flow) -> Container {
+fn reveal(flow: super::flow::Flow) -> impl Widget {
     let kind = move || {
         if flow.reveal.get() {
             Icon::EyeOff
@@ -177,58 +163,8 @@ fn reveal(flow: super::flow::Flow) -> Container {
             Icon::Eye
         }
     };
-    icon_button(kind, Size::Small, Fill::Ghost)
+    icon_button(kind)
+        .size(Size::Sm)
+        .fill(Fill::Ghost)
         .on_click(move || flow.reveal.update(|shown| *shown = !*shown))
-}
-
-/// Submit. The only part of the field that takes a click: a stray click
-/// submitting an empty password would count against `pam_faillock`.
-fn go(screen: &Screen) -> Container {
-    let theme = screen.theme;
-    let auth = screen.auth;
-    let state = auth.state;
-    let ready = move || !state.field_is_empty();
-
-    // ashell's press and hover, with a fill that says whether there is
-    // anything to send.
-    pressable(
-        container()
-            .width(34.0)
-            .height(34.0)
-            .corners(17.0)
-            .layout(Flex::column().center()),
-        0.9,
-    )
-    .background(
-        (move || {
-            if ready() || state.busy.get() {
-                theme.colors.accent
-            } else {
-                theme.colors.surface2
-            }
-        })
-        .transition(200.0),
-    )
-    .when_hovered(|s| s.lighter(0.08))
-    .on_click(move || auth.submit())
-    .child(move || {
-        if state.busy.get() {
-            icon(Icon::Refresh, 16.0, theme.colors.accent_ink).rotate(0.0.timeline(spin()))
-        } else {
-            icon(Icon::ArrowRight, 16.0, move || {
-                if ready() {
-                    theme.colors.accent_ink
-                } else {
-                    theme.colors.dim
-                }
-            })
-        }
-    })
-}
-
-pub fn spin() -> Keyframes<f32> {
-    Keyframes::new(900.0)
-        .at(0.0, 0.0)
-        .at(1.0, 360.0)
-        .repeat(Repeat::Forever)
 }

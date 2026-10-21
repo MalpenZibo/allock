@@ -11,6 +11,7 @@ pub mod pam;
 
 use guido::prelude::*;
 
+use crate::system::faillock::Faillock;
 pub use crate::system::faillock::{Lock, Tally};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -21,7 +22,7 @@ use futures::stream::FuturesUnordered;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthEvent {
     /// A question; the field is cleared for the answer.
-    Prompt { secret: bool, message: String },
+    Prompt(Prompt),
     /// Informational text from the auth stack.
     Info(String),
     /// Non-fatal error text from the auth stack.
@@ -67,6 +68,11 @@ pub enum Backend {
 pub struct Prompt {
     pub secret: bool,
     pub message: String,
+}
+
+/// Whether `prompt` asks for a secret; one is assumed before the first.
+fn secret(prompt: &Option<Prompt>) -> bool {
+    prompt.as_ref().is_none_or(|prompt| prompt.secret)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,11 +152,11 @@ impl AuthState {
     /// Tracked. Masks before the first prompt: a password shown in the clear
     /// is worse than a name shown as dots.
     pub fn asks_secret(&self) -> bool {
-        self.prompt
-            .get()
-            .as_ref()
-            .map(|prompt| prompt.secret)
-            .unwrap_or(true)
+        self.prompt.with(secret)
+    }
+
+    fn asks_secret_untracked(&self) -> bool {
+        self.prompt.with_untracked(secret)
     }
 
     /// Tracked.
@@ -158,23 +164,26 @@ impl AuthState {
         if self.asks_secret() {
             self.password.is_empty()
         } else {
-            self.input.get().is_empty()
+            self.input.with(String::is_empty)
         }
     }
 
     /// [`field_is_empty`](Self::field_is_empty), for an event handler.
     pub fn field_is_empty_untracked(&self) -> bool {
-        let secret = self
-            .prompt
-            .get_untracked()
-            .as_ref()
-            .map(|prompt| prompt.secret)
-            .unwrap_or(true);
-        if secret {
+        if self.asks_secret_untracked() {
             self.password.with_untracked(Secret::is_empty)
         } else {
-            self.input.get_untracked().is_empty()
+            self.input.with_untracked(String::is_empty)
         }
+    }
+
+    /// Tracked. The last answer was refused and nothing new is typed yet:
+    /// the field's ring, the island's glow and the line under the field.
+    pub fn refused(&self) -> bool {
+        self.field_is_empty()
+            && self
+                .notice
+                .with(|n| matches!(n, Some(n) if n.level == NoticeLevel::Error))
     }
 
     pub fn clear_field(&self) {
@@ -197,13 +206,8 @@ impl Auth {
         if state.busy.get_untracked() || state.authenticated.get_untracked() {
             return;
         }
-        let secret = state
-            .prompt
-            .get_untracked()
-            .map(|prompt| prompt.secret)
-            .unwrap_or(true);
         // An empty answer would still count towards pam_faillock.
-        let answer = if secret {
+        let answer = if state.asks_secret_untracked() {
             if state.password.with_untracked(Secret::is_empty) {
                 return;
             }
@@ -269,8 +273,8 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
     let locked_w = state.locked.writer();
     let tally_w = state.tally.writer();
     // The greeter's account changes with the picker, so it has no tally.
-    let tally_user = match &backend {
-        Backend::Pam { user, .. } => Some(user.clone()),
+    let faillock = match &backend {
+        Backend::Pam { user, .. } => Some(Faillock::new(user)),
         Backend::Greetd { .. } => None,
         #[cfg(test)]
         Backend::Silent => None,
@@ -305,7 +309,7 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
 
         // When to read the faillock tally again: now, when the lock's
         // description changes, and after every refusal.
-        let mut lock_check = tally_user.as_ref().map(|_| Instant::now());
+        let mut lock_check = faillock.as_ref().map(|_| Instant::now());
 
         loop {
             tokio::select! {
@@ -322,11 +326,11 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                 Some(event) = event_rx.recv() => {
                     log::debug!("auth event: {event:?}");
                     match event {
-                        AuthEvent::Prompt { secret, message } => {
+                        AuthEvent::Prompt(prompt) => {
                             wipes += 1;
                             wipes_w.set(wipes);
                             busy_w.set(false);
-                            prompt_w.set(Some(Prompt { secret, message }));
+                            prompt_w.set(Some(prompt));
                         }
                         AuthEvent::Info(text) => {
                             notice_w.set(Some(Notice { level: NoticeLevel::Info, text }));
@@ -341,7 +345,7 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                             notice_w.set(Some(Notice { level: NoticeLevel::Error, text }));
                             rejections += 1;
                             rejections_w.set(rejections);
-                            if tally_user.is_some() {
+                            if faillock.is_some() {
                                 lock_check = Some(Instant::now());
                             }
                         }
@@ -368,9 +372,9 @@ pub fn start(backend: Backend, fingerprint: Option<FingerprintConfig>) -> Auth {
                     if lock_check.is_some() =>
                 {
                     let now = std::time::SystemTime::now();
-                    let (lock, tally) = tally_user
-                        .as_deref()
-                        .map(crate::system::faillock::status)
+                    let (lock, tally) = faillock
+                        .as_ref()
+                        .map(Faillock::status)
                         .unwrap_or_default();
                     locked_w.set(lock);
                     tally_w.set(tally);

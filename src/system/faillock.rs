@@ -80,7 +80,9 @@ fn parse_options(config: &str) -> Options {
 
 fn failures(tally: &[u8]) -> Vec<u64> {
     tally
-        .chunks_exact(RECORD)
+        .as_chunks::<RECORD>()
+        .0
+        .iter()
         .filter_map(|record| {
             let status = u16::from_ne_bytes([record[54], record[55]]);
             let time = u64::from_ne_bytes(record[56..64].try_into().ok()?);
@@ -140,27 +142,45 @@ fn tally(options: &Options, failures: &[u64], now: u64) -> Option<Tally> {
     })
 }
 
-/// The lock, and the attempts used towards one. No tally file yet is no
-/// failure yet.
-pub fn status(user: &str) -> (Option<Lock>, Option<Tally>) {
-    let options = std::fs::read_to_string(CONFIG)
-        .map(|config| parse_options(&config))
-        .unwrap_or_default();
+/// One account's tally, with `faillock.conf` read once: only the tally
+/// changes between checks.
+pub struct Faillock {
+    options: Options,
+    tally: std::path::PathBuf,
+}
+
+impl Faillock {
+    pub fn new(user: &str) -> Self {
+        let options = std::fs::read_to_string(CONFIG)
+            .map(|config| parse_options(&config))
+            .unwrap_or_default();
+        let tally = Path::new(&options.dir).join(user);
+        Self { options, tally }
+    }
+
+    /// The lock, and the attempts used towards one. No tally file yet is no
+    /// failure yet.
+    pub fn status(&self) -> (Option<Lock>, Option<Tally>) {
+        status(&self.options, &self.tally)
+    }
+}
+
+fn status(options: &Options, tally_path: &Path) -> (Option<Lock>, Option<Tally>) {
     let Ok(now) = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|now| now.as_secs())
     else {
         return (None, None);
     };
-    let failures = match std::fs::read(Path::new(&options.dir).join(user)) {
+    let failures = match std::fs::read(tally_path) {
         Ok(record) => failures(&record),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         // Unreadable: say nothing rather than a count that may be wrong.
         Err(_) => return (None, None),
     };
     (
-        lock(&options, &failures, now),
-        tally(&options, &failures, now),
+        lock(options, &failures, now),
+        tally(options, &failures, now),
     )
 }
 

@@ -11,9 +11,9 @@ mod island;
 mod rest;
 #[cfg(test)]
 mod snapshots;
-pub mod theme;
 mod tick;
 
+use std::path::Path;
 use std::rc::Rc;
 
 use chrono::{DateTime, Local};
@@ -26,7 +26,7 @@ use crate::services::battery::Battery;
 use crate::services::power::Power;
 use crate::services::snapshot::Snapshot;
 use crate::system::user::UserInfo;
-use ashell_ui::Theme;
+use ashell_ui::Ui;
 use flow::{Flow, Phase};
 
 pub type Snapshots = std::sync::Arc<std::collections::HashMap<String, Snapshot>>;
@@ -35,15 +35,19 @@ pub type Snapshots = std::sync::Arc<std::collections::HashMap<String, Snapshot>>
 #[derive(Clone)]
 pub struct Screen {
     pub config: Rc<Config>,
-    pub theme: Theme,
-    /// Behind the wallpaper, and instead of it.
-    pub background: Color,
+    /// What ashell-ui's components read.
+    pub ui: Ui,
+    /// The picture at `background.path`, resolved once; `None` when unset
+    /// or unreadable.
+    pub wallpaper: Option<Rc<Path>>,
     pub mode: Mode,
     pub flow: Flow,
     pub auth: Auth,
     pub battery: Signal<Option<Battery>>,
     pub power: Power,
     pub now: Signal<DateTime<Local>>,
+    /// `now` in the configured time format, for the clock and the rest.
+    pub time: Memo<String>,
     pub host: Rc<str>,
     /// The session as it was when the lock was asked for, by output name.
     /// Empty unless the background is a snapshot.
@@ -58,9 +62,16 @@ pub struct Screen {
     pub session: RwSignal<usize>,
 }
 
+impl Screen {
+    /// Behind the wallpaper, and instead of it: the island's colour, opaque.
+    pub fn background(&self) -> Color {
+        self.ui.colors.island.with_alpha(1.0)
+    }
+}
+
 pub fn view(screen: Screen, output: OutputInfo) -> Container {
-    // ashell's components read it from here.
-    ashell_ui::provide_theme(screen.theme);
+    // ashell-ui's components read it from here.
+    ashell_ui::provide_ui(screen.ui);
     let controls = shows_controls(&screen, output.id);
     let height = create_signal(0.0f32);
     let root_ref = create_widget_ref();
@@ -70,7 +81,7 @@ pub fn view(screen: Screen, output: OutputInfo) -> Container {
         .width(fill())
         .height(fill())
         .widget_ref(root_ref)
-        .background(screen.background)
+        .background(screen.background())
         .layout(ZStack::new())
         .child(background::view(&screen, &output))
         .child({

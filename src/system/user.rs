@@ -15,18 +15,23 @@ pub struct UserInfo {
 
 impl UserInfo {
     fn from_user(user: &User) -> Self {
-        let name = user.name().to_string_lossy().into_owned();
+        Self::new(
+            user.name().to_string_lossy().into_owned(),
+            &user.gecos().to_string_lossy(),
+            user.home_dir(),
+        )
+    }
+
+    fn new(name: String, gecos: &str, home: &Path) -> Self {
         // GECOS is comma-separated; only the first field is the full name.
-        let display_name = user
-            .gecos()
-            .to_string_lossy()
+        let display_name = gecos
             .split(',')
             .next()
             .map(str::trim)
             .filter(|full_name| !full_name.is_empty())
             .map(str::to_owned)
             .unwrap_or_else(|| name.clone());
-        let avatar = avatar(&name, user.home_dir());
+        let avatar = avatar(&name, home);
         Self {
             name,
             display_name,
@@ -74,9 +79,9 @@ pub fn login_users() -> Vec<UserInfo> {
             return Vec::new();
         }
     };
-    login_names(&passwd, range)
-        .iter()
-        .filter_map(|name| by_name(name))
+    login_accounts(&passwd, range)
+        .into_iter()
+        .map(|(name, gecos, home)| UserInfo::new(name.to_owned(), gecos, Path::new(home)))
         .collect()
 }
 
@@ -92,22 +97,23 @@ fn uid_range(login_defs: &str) -> std::ops::RangeInclusive<u32> {
     value("UID_MIN").unwrap_or(1000)..=value("UID_MAX").unwrap_or(60000)
 }
 
-fn login_names(passwd: &str, uids: std::ops::RangeInclusive<u32>) -> Vec<String> {
-    let mut accounts: Vec<(u32, String)> = passwd
+/// Name, GECOS and home of each account that can log in, in uid order.
+fn login_accounts(passwd: &str, uids: std::ops::RangeInclusive<u32>) -> Vec<(&str, &str, &str)> {
+    let mut accounts: Vec<(u32, (&str, &str, &str))> = passwd
         .lines()
         .filter_map(|line| {
             let fields: Vec<&str> = line.split(':').collect();
-            let [name, _, uid, _, _, _, shell] = fields[..] else {
+            let [name, _, uid, _, gecos, home, shell] = fields[..] else {
                 return None;
             };
             let uid = uid.parse::<u32>().ok()?;
             let can_log_in =
                 !shell.is_empty() && !shell.ends_with("/nologin") && !shell.ends_with("/false");
-            (uids.contains(&uid) && can_log_in).then(|| (uid, name.to_owned()))
+            (uids.contains(&uid) && can_log_in).then_some((uid, (name, gecos, home)))
         })
         .collect();
-    accounts.sort();
-    accounts.into_iter().map(|(_, name)| name).collect()
+    accounts.sort_by_key(|(uid, _)| *uid);
+    accounts.into_iter().map(|(_, account)| account).collect()
 }
 
 #[cfg(test)]
@@ -127,7 +133,23 @@ malformed line
 
     #[test]
     fn only_people_who_can_log_in_are_listed_in_uid_order() {
-        assert_eq!(login_names(PASSWD, 1000..=60000), ["zibo", "bruno"]);
+        let names: Vec<&str> = login_accounts(PASSWD, 1000..=60000)
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect();
+        assert_eq!(names, ["zibo", "bruno"]);
+    }
+
+    #[test]
+    fn a_full_name_is_the_first_gecos_field() {
+        let user = UserInfo::new(
+            "zibo".to_owned(),
+            "Simone Camito,,,",
+            Path::new("/nonexistent"),
+        );
+        assert_eq!(user.display_name, "Simone Camito");
+        let user = UserInfo::new("bruno".to_owned(), "", Path::new("/nonexistent"));
+        assert_eq!(user.display_name, "bruno");
     }
 
     #[test]

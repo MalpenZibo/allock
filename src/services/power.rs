@@ -3,18 +3,8 @@
 //! logged; nothing on the screen depends on it.
 
 use guido::prelude::*;
-use zbus::proxy;
 
-#[proxy(
-    interface = "org.freedesktop.login1.Manager",
-    default_service = "org.freedesktop.login1",
-    default_path = "/org/freedesktop/login1"
-)]
-trait Manager {
-    fn suspend(&self, interactive: bool) -> zbus::Result<()>;
-    fn reboot(&self, interactive: bool) -> zbus::Result<()>;
-    fn power_off(&self, interactive: bool) -> zbus::Result<()>;
-}
+use super::logind::{self, ManagerProxy};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerAction {
@@ -58,8 +48,7 @@ impl Power {
 }
 
 async fn request(action: PowerAction) -> zbus::Result<()> {
-    let connection = zbus::Connection::system().await?;
-    let manager = ManagerProxy::new(&connection).await?;
+    let manager = ManagerProxy::new(&logind::system().await?).await?;
     match action {
         PowerAction::Suspend => manager.suspend(false).await,
         PowerAction::Reboot => manager.reboot(false).await,

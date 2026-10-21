@@ -102,12 +102,8 @@ async fn main() {
         Mode::Greeter => String::new(),
     };
 
-    if config.background.path.is_some() && config.background.resolved_path().is_none() {
-        log::warn!("background.path is set but unreadable; using the background colour");
-    }
-
     let mut app = App::new();
-    if let Some(family) = &config.appearance.font_name {
+    if let Some(family) = &config.appearance.fonts.sans {
         app = app.default_font_family(FontFamily::name(family));
     }
 
@@ -129,9 +125,19 @@ async fn main() {
 
 /// The parts of a [`Screen`] every mode builds the same way.
 fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
+    let clock_config = &config.clock;
+    let now = clock::now(
+        clock::shows_seconds(&clock_config.time_format)
+            || clock::shows_seconds(&clock_config.date_format),
+    );
+    let time_format = config.clock.time_format.clone();
     Screen {
-        theme: ui::theme::from_config(&config.appearance),
-        background: config::color(config.appearance.background_color),
+        // A lock comes up before it could ask the desktop which side it
+        // prefers: `mode = "auto"` shows the dark one.
+        ui: config.appearance.ui(None),
+        wallpaper: config.background.resolved_path().map(Rc::from),
+        time: create_memo(move || now.get().format(&time_format).to_string()),
+        now,
         mode,
         flow,
         auth,
@@ -141,7 +147,6 @@ fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
             create_signal(None).read_only()
         },
         power: Power::start(),
-        now: clock::now(),
         host: system::hostname().into(),
         snapshots: Snapshots::default(),
         user: create_signal(None),
@@ -178,6 +183,8 @@ fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
 
     let handoff = (mode == Mode::Lock).then(|| Handoff::start(config.handoff));
     let snapshot = config.background.source == BackgroundSource::Snapshot;
+    // Ready while the bar goes away; taken once it has.
+    let pending = snapshot.then(snapshot::prepare).flatten();
     // Over a snapshot the island folds while the session sharpens back in.
     let fold_ms = if snapshot { SHARPEN_MS } else { FOLD_MS };
     let flow = Flow::start(auth, fold_ms, move || match mode {
@@ -197,10 +204,9 @@ fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
     });
 
     // Away from the keyboard: back to rest.
-    let away = (config.auth.idle_timeout > 0)
-        .then(|| Duration::from_secs(config.auth.idle_timeout))
-        .and_then(idle::watch);
-    let away = idle::resting(away);
+    let away = idle::resting(
+        (config.auth.idle_timeout > 0).then(|| Duration::from_secs(config.auth.idle_timeout)),
+    );
     create_effect(move || {
         if away.get() {
             flow.rest();
@@ -213,7 +219,7 @@ fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
     match handoff {
         None => {
             log::warn!("preview mode: the session is NOT locked");
-            once_captured(snapshot, move |snapshots| {
+            once_captured(pending, move |snapshots| {
                 let screen = Screen {
                     snapshots,
                     ..screen
@@ -231,7 +237,7 @@ fn run_lock(config: Rc<Config>, pam_service: String, mode: Mode) {
             once(
                 move || ready.get(),
                 move || {
-                    once_captured(snapshot, move |snapshots| {
+                    once_captured(pending, move |snapshots| {
                         let screen = Screen {
                             snapshots,
                             ..screen
@@ -262,24 +268,20 @@ const SNAPSHOT_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Run `then` with a picture of every output, or with none at once when the
 /// background is not a snapshot or the capture fails.
-fn once_captured(snapshot: bool, then: impl FnOnce(Snapshots) + 'static) {
-    if !snapshot {
+fn once_captured(pending: Option<snapshot::Pending>, then: impl FnOnce(Snapshots) + 'static) {
+    let Some(pending) = pending else {
         return then(Snapshots::default());
-    }
+    };
     let captured = create_signal(None::<Snapshots>);
     let writer = captured.writer();
     create_task(move |_ctx| async move {
-        let snapshots = snapshot::capture(SNAPSHOT_TIMEOUT).await;
+        let snapshots = pending.capture(SNAPSHOT_TIMEOUT).await;
         writer.set(Some(Arc::new(snapshots)));
     });
-    let then = std::cell::Cell::new(Some(then));
-    create_effect(move || {
-        if let Some(snapshots) = captured.get()
-            && let Some(then) = then.take()
-        {
-            then(snapshots);
-        }
-    });
+    once(
+        move || captured.with(Option::is_some),
+        move || then(captured.get_untracked().unwrap_or_default()),
+    );
 }
 
 /// Exit on the `Locked → Unlocked` edge only, after telling the bar it may
@@ -472,7 +474,7 @@ fn spawn_fullscreen_surfaces(screen: Screen, keyboard: KeyboardInteractivity) {
                     .keyboard_interactivity(keyboard)
                     .namespace("allock")
                     .output(output.id)
-                    .background_color(screen.background),
+                    .background_color(screen.background()),
                 move || ui::view(screen.clone(), info.clone()),
             );
             handles.insert(output.id, handle);

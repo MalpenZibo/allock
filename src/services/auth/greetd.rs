@@ -11,18 +11,7 @@ use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 use zeroize::Zeroizing;
 
-use super::{AuthCommand, AuthEvent};
-
-enum Answer {
-    Text(Secret),
-    Start {
-        command: Vec<String>,
-        env: Vec<String>,
-    },
-    Restart,
-    User(Option<String>),
-    Closed,
-}
+use super::{AuthCommand, AuthEvent, Prompt};
 
 enum Outgoing {
     Request(Request),
@@ -38,16 +27,6 @@ enum Step {
     /// `None` asks for the name.
     CancelAndSwitch(Option<String>),
     Stop,
-}
-
-async fn next(cmd_rx: &mut mpsc::Receiver<AuthCommand>) -> Answer {
-    match cmd_rx.recv().await {
-        Some(AuthCommand::Respond(text)) => Answer::Text(text),
-        Some(AuthCommand::StartSession { command, env }) => Answer::Start { command, env },
-        Some(AuthCommand::Restart) => Answer::Restart,
-        Some(AuthCommand::SetUser(user)) => Answer::User(user),
-        None => Answer::Closed,
-    }
 }
 
 pub async fn run(
@@ -144,23 +123,23 @@ async fn handle(
         } => match auth_message_type {
             kind @ (AuthMessageType::Secret | AuthMessageType::Visible) => {
                 let _ = event_tx
-                    .send(AuthEvent::Prompt {
+                    .send(AuthEvent::Prompt(Prompt {
                         secret: matches!(kind, AuthMessageType::Secret),
                         message: auth_message,
-                    })
+                    }))
                     .await;
 
-                match next(cmd_rx).await {
-                    Answer::Text(answer) => Step::Send(Outgoing::Answer(answer)),
-                    Answer::Restart => Step::CancelAndRestart,
-                    Answer::User(user) => Step::CancelAndSwitch(user),
+                match cmd_rx.recv().await {
+                    Some(AuthCommand::Respond(answer)) => Step::Send(Outgoing::Answer(answer)),
+                    Some(AuthCommand::Restart) => Step::CancelAndRestart,
+                    Some(AuthCommand::SetUser(user)) => Step::CancelAndSwitch(user),
                     // Answer empty rather than stall greetd.
-                    Answer::Start { .. } => {
+                    Some(AuthCommand::StartSession { .. }) => {
                         Step::Send(Outgoing::Request(Request::PostAuthMessageResponse {
                             response: None,
                         }))
                     }
-                    Answer::Closed => Step::Stop,
+                    None => Step::Stop,
                 }
             }
 
@@ -181,14 +160,14 @@ async fn handle(
             *authenticated = true;
             let _ = event_tx.send(AuthEvent::Success).await;
             loop {
-                match next(cmd_rx).await {
-                    Answer::Start { command, env } => {
+                match cmd_rx.recv().await {
+                    Some(AuthCommand::StartSession { command, env }) => {
                         break Step::Send(Outgoing::Request(Request::StartSession {
                             cmd: command,
                             env,
                         }));
                     }
-                    Answer::Closed => break Step::Stop,
+                    None => break Step::Stop,
                     // Already authenticated: the only thing left that matters
                     // is which session to launch.
                     _ => continue,
@@ -235,19 +214,19 @@ async fn ask_username(
     event_tx: &mpsc::Sender<AuthEvent>,
 ) -> Option<String> {
     let _ = event_tx
-        .send(AuthEvent::Prompt {
+        .send(AuthEvent::Prompt(Prompt {
             secret: false,
             message: "Username".to_owned(),
-        })
+        }))
         .await;
 
     loop {
-        match next(cmd_rx).await {
-            Answer::Text(name) if !name.expose().trim().is_empty() => {
+        match cmd_rx.recv().await {
+            Some(AuthCommand::Respond(name)) if !name.expose().trim().is_empty() => {
                 return Some(name.expose().trim().to_owned());
             }
-            Answer::User(Some(name)) => return Some(name),
-            Answer::Closed => return None,
+            Some(AuthCommand::SetUser(Some(name))) => return Some(name),
+            None => return None,
             _ => continue,
         }
     }
@@ -270,13 +249,7 @@ async fn write(
 ) -> bool {
     match request.write_to(stream).await {
         Ok(()) => true,
-        Err(e) => {
-            log::error!("greetd write failed: {e}");
-            let _ = event_tx
-                .send(AuthEvent::Ended("Lost the connection to greetd".to_owned()))
-                .await;
-            false
-        }
+        Err(e) => lost(event_tx, "write", e).await,
     }
 }
 
@@ -292,19 +265,13 @@ async fn write_answer(
         return false;
     };
     let length = (body.len() as u32).to_ne_bytes();
-    let sent = match stream.write_all(&length).await {
-        Ok(()) => stream.write_all(&body).await,
-        Err(e) => Err(e),
+    let sent = async {
+        stream.write_all(&length).await?;
+        stream.write_all(&body).await
     };
-    match sent {
+    match sent.await {
         Ok(()) => true,
-        Err(e) => {
-            log::error!("greetd write failed: {e}");
-            let _ = event_tx
-                .send(AuthEvent::Ended("Lost the connection to greetd".to_owned()))
-                .await;
-            false
-        }
+        Err(e) => lost(event_tx, "write", e).await,
     }
 }
 
@@ -336,13 +303,19 @@ async fn read(stream: &mut UnixStream, event_tx: &mpsc::Sender<AuthEvent>) -> Op
     match Response::read_from(stream).await {
         Ok(response) => Some(response),
         Err(e) => {
-            log::error!("greetd read failed: {e}");
-            let _ = event_tx
-                .send(AuthEvent::Ended("Lost the connection to greetd".to_owned()))
-                .await;
+            lost(event_tx, "read", e).await;
             None
         }
     }
+}
+
+/// Says the backend is gone. Always false, for a writer to return.
+async fn lost(event_tx: &mpsc::Sender<AuthEvent>, what: &str, e: impl std::fmt::Display) -> bool {
+    log::error!("greetd {what} failed: {e}");
+    let _ = event_tx
+        .send(AuthEvent::Ended("Lost the connection to greetd".to_owned()))
+        .await;
+    false
 }
 
 #[cfg(test)]

@@ -56,21 +56,37 @@ enabled = true
 timeout_ms = 600
 
 [appearance]
-# The font for text, the system default when unset.
-# font_name = "Inter"
-island_color = "#050508"
-background_color = "#0b0b12"
-text_color = "#cdd6f4"
-primary_color = "#fab387"
-success_color = "#a6e3a1"
-warning_color = "#f9e2af"
-danger_color = "#f38ba8"
-# How much of island_color is painted, 0.0 to 1.0, as ashell's opacity; a
-# colour's own alpha (#rrggbbaa) multiplies with it.
-opacity = 1.0
-# Whether what is behind a translucent island softens: "auto" (when opacity is
-# below 1), "always" or "never".
-blur = "auto"
+# ashell-ui's own [appearance] table (its UiConfig), read as ashell reads it.
+# Unset, it is ashell-ui's default look.
+# One of "Tokyo Night", "Catppuccin", "Nord", "Gruvbox", "Dracula",
+# "Rosé Pine", "Everforest", "Kanagawa".
+theme = "Tokyo Night"
+# "auto", "dark" or "light": which flavour shows. A lock comes up before it
+# could ask the desktop, so "auto" shows the dark one.
+mode = "auto"
+# The flavour of each kind and the accent, by name; the theme's own when unset.
+# dark_flavor = "Storm"
+# light_flavor = "Day"
+# accent = "Blue"
+# "compact", "default" or "comfortable": type, controls and space move a step.
+density = "default"
+# "square", "soft" or "round": corners move a step; pills stay pills.
+shape = "soft"
+# "solid", "translucent" or "glass": the island's opacity and the blur behind it.
+material = "solid"
+# "full", "reduced" (fades only) or "none".
+motion = "full"
+
+# Font families by name; the system's when unset.
+# [appearance.fonts]
+# sans = "Inter"
+# mono = "JetBrains Mono"
+
+# Colours of ashell-ui's scheme set over the theme's: background (the island),
+# text, sub, dim, accent, success, warning, danger, and on_accent, on_success,
+# on_warning, on_danger for what reads on each fill.
+# [appearance.colors]
+# accent = "#7aa2f7"
 
 # Greeter only (allock --greeter).
 [greeter]

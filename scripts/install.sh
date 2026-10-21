@@ -162,9 +162,9 @@ if [[ $GREETER -eq 1 ]]; then
 
     APPEARANCE_BLOCK="$(toml_table appearance "$USER_CONFIG")"
     if [[ -n "$APPEARANCE_BLOCK" ]]; then
-        echo "    colours: [appearance] from $USER_CONFIG"
+        echo "    look: [appearance] from $USER_CONFIG"
     else
-        echo "    no [appearance] in $USER_CONFIG; the greeter uses the default colours"
+        echo "    no [appearance] in $USER_CONFIG; the greeter wears ashell-ui's default look"
     fi
 
     MAIN_OUTPUT_LINE="$(toml_line main_output "$USER_CONFIG")"

@@ -241,6 +241,16 @@ fn snapshots() {
     lock.screen.flow.zone.set(Some(super::flow::Zone::Power));
     lock.run(Duration::from_millis(800));
     lock.save("lock-5-power");
+    lock.screen.flow.zone.set(None);
+    state.locked.set(Some(crate::system::faillock::Lock::Until(
+        std::time::SystemTime::now() + Duration::from_secs(272),
+    )));
+    lock.run(Duration::from_millis(800));
+    lock.save("lock-5b-lockout");
+    lock.settle(Phase::Rest);
+    lock.save("lock-5c-lockout-rest");
+    state.locked.set(None);
+    lock.settle(Phase::Awake);
     // The flow's own timers run on the wall clock: the tick shows for 600 ms.
     // The tick is drawn on the wall clock: 150 ms of wait, then 500 of pen.
     state.authenticated.set(true);
@@ -280,7 +290,7 @@ fn snapshots() {
 
     // A translucent island softens the session through it.
     let mut glass = Scene::with(Mode::Lock, snapshots, |config| {
-        config.appearance.opacity = 0.6;
+        config.appearance.material = ashell_ui::ui::Material::Glass;
     })
     .unwrap();
     glass.save("translucent-0-seed");
@@ -291,6 +301,22 @@ fn snapshots() {
     glass.run(Duration::from_millis(1800));
     glass.save("translucent-2-card");
     drop(glass);
+
+    // Another theme, flavour and accent, light, compact, round and glass:
+    // everything follows `[appearance]`.
+    let mut themed = Scene::with(Mode::Lock, Default::default(), |config| {
+        config.appearance = toml::from_str(
+            "theme = \"Catppuccin\"\nmode = \"light\"\naccent = \"Mauve\"\n\
+             density = \"compact\"\nshape = \"round\"\nmaterial = \"glass\"",
+        )
+        .unwrap();
+    })
+    .unwrap();
+    themed.settle(Phase::Rest);
+    themed.save("themed-1-rest");
+    themed.settle(Phase::Awake);
+    themed.save("themed-2-card");
+    drop(themed);
 
     let mut greeter = Scene::new(Mode::Greeter).unwrap();
     greeter.settle(Phase::Rest);

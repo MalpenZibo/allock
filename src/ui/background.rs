@@ -10,6 +10,7 @@ use super::Screen;
 use super::flow::Phase;
 use crate::Mode;
 use crate::config::BackgroundFit;
+use ashell_ui::motion;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Look {
@@ -53,7 +54,7 @@ pub fn view(screen: &Screen, output: &OutputInfo) -> Option<Container> {
         // The output's own pixels: they fill it exactly.
         Some(source) => (source, ContentFit::Fill),
         None => (
-            ImageSource::Path(screen.config.background.resolved_path()?),
+            ImageSource::Path(screen.wallpaper.as_deref()?.to_path_buf()),
             match screen.config.background.fit {
                 BackgroundFit::Cover => ContentFit::Cover,
                 BackgroundFit::Contain => ContentFit::Contain,
@@ -66,15 +67,15 @@ pub fn view(screen: &Screen, output: &OutputInfo) -> Option<Container> {
         screen.config.background.blur.max(0.0),
         screen.config.background.dim.clamp(0.0, 1.0),
     );
-    let phase = screen.flow.phase;
+    let flow = screen.flow;
     let greeter = screen.mode == Mode::Greeter;
 
     let look = create_memo(move || {
         let zoom = if blur > 0.0 { BLUR_ZOOM } else { 1.0 };
-        match phase.get() {
+        match flow.phase.get() {
             Phase::Seed if is_snapshot => SHARP,
             Phase::Gone if is_snapshot || greeter => SHARP,
-            Phase::Awake | Phase::Ok => Look {
+            _ if flow.is_down() => Look {
                 blur,
                 dim,
                 scale: zoom,
@@ -86,7 +87,7 @@ pub fn view(screen: &Screen, output: &OutputInfo) -> Option<Container> {
             },
         }
     });
-    let ease = || Transition::new(EASE_MS, TimingFunction::EaseInOut);
+    let ease = || motion::easing(EASE_MS);
 
     // A file is decoded off the frame, so the first frame (the seed) goes out
     // without waiting for it; a snapshot is there from the first frame.
@@ -98,7 +99,10 @@ pub fn view(screen: &Screen, output: &OutputInfo) -> Option<Container> {
             .width(fill())
             .height(fill())
             .layout(ZStack::new())
-            .opacity((move || if ready.get() { 1.0 } else { 0.0 }).transition(FADE_IN_MS))
+            .opacity(
+                (move || if ready.get() { 1.0 } else { 0.0 })
+                    .transition(motion::easing(FADE_IN_MS)),
+            )
             .child(
                 container()
                     .width(fill())
@@ -107,7 +111,7 @@ pub fn view(screen: &Screen, output: &OutputInfo) -> Option<Container> {
                     .blur((move || look.get().blur).transition(ease()))
                     .scale(
                         (move || Scale::uniform(look.get().scale))
-                            .transition(Transition::spring(ZOOM_SPRING)),
+                            .transition(motion::springing(ZOOM_SPRING)),
                     )
                     .child(picture),
             )

@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use guido::prelude::*;
 use guido::widget_prelude::*;
 
+use ashell_ui::ui::Motion;
+
 /// The check's corners in Lucide's 24-unit box, in the order it is drawn.
 const POINTS: [(f32, f32); 3] = [(20.0, 6.0), (9.0, 17.0), (4.0, 12.0)];
 const DELAY: Duration = Duration::from_millis(150);
@@ -23,6 +25,15 @@ struct Tick {
 }
 
 pub fn tick(size: f32, stroke: f32, color: Color) -> impl Widget {
+    // Without full motion it is there at once, already drawn.
+    if ashell_ui::ui().motion != Motion::Full {
+        return Tick {
+            size,
+            stroke,
+            color,
+            drawn: create_signal(1.0f32).into(),
+        };
+    }
     let drawn = create_signal(0.0f32);
     let start = Instant::now() + DELAY;
     let handle: Rc<Cell<Option<TimerHandle>>> = Rc::default();
@@ -33,7 +44,7 @@ pub fn tick(size: f32, stroke: f32, color: Color) -> impl Widget {
             .as_secs_f32()
             / DRAW.as_secs_f32();
         let t = t.clamp(0.0, 1.0);
-        // CSS's `ease`, near enough: quick out of the start, slow into the end.
+        // A cubic ease-out: quick out of the start, slow into the end.
         drawn.set(1.0 - (1.0 - t).powi(3));
         if t >= 1.0
             && let Some(handle) = own.take()

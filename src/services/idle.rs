@@ -14,22 +14,16 @@ use wayland_protocols::ext::idle_notify::v1::client::{
     ext_idle_notifier_v1::ExtIdleNotifierV1,
 };
 
-/// `true` after `timeout` without input, `false` at the next input. `None`
-/// when the compositor cannot say.
-pub fn watch(timeout: Duration) -> Option<watch::Receiver<bool>> {
-    match start(timeout) {
-        Ok(idle) => Some(idle),
-        Err(e) => {
-            log::info!("no idle notifications: {e}");
-            None
-        }
-    }
-}
-
-/// The same answer as a signal; always `false` without a watcher.
-pub fn resting(idle: Option<watch::Receiver<bool>>) -> Signal<bool> {
+/// `true` after `timeout` without input, `false` at the next input. Always
+/// `false` without a timeout, or when the compositor cannot say.
+pub fn resting(timeout: Option<Duration>) -> Signal<bool> {
     let resting = create_signal(false);
     let writer = resting.writer();
+    let idle = timeout.and_then(|timeout| {
+        start(timeout)
+            .inspect_err(|e| log::info!("no idle notifications: {e}"))
+            .ok()
+    });
     if let Some(mut idle) = idle {
         create_task(move |_ctx| async move {
             while idle.changed().await.is_ok() {
@@ -111,26 +105,5 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Idle {
     }
 }
 
-impl Dispatch<wl_seat::WlSeat, ()> for Idle {
-    fn event(
-        _: &mut Self,
-        _: &wl_seat::WlSeat,
-        _: wl_seat::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-    }
-}
-
-impl Dispatch<ExtIdleNotifierV1, ()> for Idle {
-    fn event(
-        _: &mut Self,
-        _: &ExtIdleNotifierV1,
-        _: <ExtIdleNotifierV1 as Proxy>::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-    }
-}
+wayland_client::delegate_noop!(Idle: ignore wl_seat::WlSeat);
+wayland_client::delegate_noop!(Idle: ignore ExtIdleNotifierV1);

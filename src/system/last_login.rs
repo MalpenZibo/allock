@@ -87,11 +87,11 @@ fn write(path: &Path, last: &LastLogin) {
 }
 
 fn path() -> Option<PathBuf> {
-    let dir = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .filter(|dir| dir.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(dir.join("allock").join("last-login.toml"))
+    Some(
+        crate::config::xdg_dir("XDG_CACHE_HOME", ".cache")?
+            .join("allock")
+            .join("last-login.toml"),
+    )
 }
 
 #[cfg(test)]

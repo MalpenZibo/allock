@@ -6,14 +6,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use guido::prelude::Color;
-use hex_color::HexColor;
+use ashell_ui::config::UiConfig;
 use serde::Deserialize;
 
-#[derive(Deserialize, Clone, Debug)]
+/// Everything but `log_level`, which [`log_level`] reads before the logger
+/// is up.
+#[derive(Deserialize, Clone, Debug, Default)]
 #[serde(default)]
 pub struct Config {
-    pub log_level: String,
     /// Which outputs show the clock and login card; every output is still locked.
     pub main_output: Outputs,
     pub background: BackgroundConfig,
@@ -21,26 +21,10 @@ pub struct Config {
     pub auth: AuthConfig,
     pub indicators: IndicatorsConfig,
     pub greeter: GreeterConfig,
-    pub appearance: Appearance,
+    /// ashell-ui's own `[appearance]` table, read as ashell reads it.
+    pub appearance: UiConfig,
     pub island: IslandConfig,
     pub handoff: HandoffConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            log_level: "warn".to_owned(),
-            main_output: Outputs::default(),
-            background: BackgroundConfig::default(),
-            clock: ClockConfig::default(),
-            auth: AuthConfig::default(),
-            indicators: IndicatorsConfig::default(),
-            greeter: GreeterConfig::default(),
-            appearance: Appearance::default(),
-            island: IslandConfig::default(),
-            handoff: HandoffConfig::default(),
-        }
-    }
 }
 
 /// Which outputs something is drawn on.
@@ -140,11 +124,11 @@ impl BackgroundConfig {
         let resolved = std::fs::canonicalize(&path)
             .inspect_err(|e| log::warn!("background.path {path:?} is unusable: {e}"))
             .ok()?;
-        if resolved.is_file() {
-            Some(resolved)
-        } else {
-            None
+        if !resolved.is_file() {
+            log::warn!("background.path {path:?} is not a file");
+            return None;
         }
+        Some(resolved)
     }
 }
 
@@ -276,113 +260,6 @@ impl Default for GreeterConfig {
     }
 }
 
-/// Colours and font. Unknown keys are ignored rather than rejected.
-#[derive(Deserialize, Clone, Debug)]
-#[serde(default)]
-pub struct Appearance {
-    pub font_name: Option<String>,
-    // Each colour also reads the `{ base = .., weak = .. }` tables of earlier
-    // configs, keeping the base.
-    /// The island, and the seed it starts and ends as.
-    #[serde(deserialize_with = "base_color")]
-    pub island_color: HexColor,
-    /// Behind the wallpaper, and instead of it when there is none.
-    #[serde(deserialize_with = "base_color")]
-    pub background_color: HexColor,
-    #[serde(deserialize_with = "base_color")]
-    pub text_color: HexColor,
-    #[serde(deserialize_with = "base_color")]
-    pub primary_color: HexColor,
-    #[serde(deserialize_with = "base_color")]
-    pub success_color: HexColor,
-    #[serde(deserialize_with = "base_color")]
-    pub warning_color: HexColor,
-    #[serde(deserialize_with = "base_color")]
-    pub danger_color: HexColor,
-    /// How much of the island's colour is painted, from 0 to 1, the key
-    /// ashell's surfaces read. A colour's own alpha multiplies with it.
-    #[serde(deserialize_with = "opacity")]
-    pub opacity: f32,
-    /// Whether what is behind a translucent island softens.
-    pub blur: BlurMode,
-}
-
-/// When the island blurs what is behind it, as ashell's `blur`.
-#[derive(Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum BlurMode {
-    /// Only when the island is translucent: an opaque one hides it anyway.
-    #[default]
-    Auto,
-    Always,
-    Never,
-}
-
-impl BlurMode {
-    pub fn enabled(self, opacity: f32) -> bool {
-        match self {
-            Self::Auto => opacity < 1.0,
-            Self::Always => true,
-            Self::Never => false,
-        }
-    }
-}
-
-impl Appearance {
-    /// The island's paint, with its opacity.
-    pub fn island(&self) -> Color {
-        let island = color(self.island_color);
-        island.with_alpha(island.a * self.opacity)
-    }
-}
-
-impl Default for Appearance {
-    fn default() -> Self {
-        Self {
-            font_name: None,
-            island_color: HexColor::rgb(5, 5, 8),
-            background_color: HexColor::rgb(11, 11, 18),
-            text_color: HexColor::rgb(205, 214, 244),
-            primary_color: HexColor::rgb(250, 179, 135),
-            success_color: HexColor::rgb(166, 227, 161),
-            warning_color: HexColor::rgb(249, 226, 175),
-            danger_color: HexColor::rgb(243, 139, 168),
-            opacity: 1.0,
-            blur: BlurMode::Auto,
-        }
-    }
-}
-
-fn base_color<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<HexColor, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Either {
-        Plain(HexColor),
-        Table { base: HexColor },
-    }
-    Ok(match Either::deserialize(deserializer)? {
-        Either::Plain(color) | Either::Table { base: color } => color,
-    })
-}
-
-fn opacity<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
-    let v = f32::deserialize(deserializer)?;
-    if (0.0..=1.0).contains(&v) {
-        Ok(v)
-    } else {
-        Err(serde::de::Error::custom("opacity is between 0.0 and 1.0"))
-    }
-}
-
-pub fn color(c: HexColor) -> Color {
-    Color::rgba(
-        c.r as f32 / 255.0,
-        c.g as f32 / 255.0,
-        c.b as f32 / 255.0,
-        c.a as f32 / 255.0,
-    )
-}
-
 /// The island's resting place. ashell reads the same `[island.seed]`; the
 /// two need not match, since neither island is on screen at the cut.
 #[derive(Deserialize, Clone, Debug, Default)]
@@ -439,22 +316,19 @@ pub fn expand_tilde(path: &str) -> PathBuf {
 }
 
 pub fn default_config_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home)
-        .join(".config")
+    xdg_dir("XDG_CONFIG_HOME", ".config")
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("allock")
         .join("config.toml")
 }
 
-fn read_toml(path: &Path) -> Option<toml::Table> {
-    let content = std::fs::read_to_string(path).ok()?;
-    match toml::from_str::<toml::Table>(&content) {
-        Ok(table) => Some(table),
-        Err(e) => {
-            log::warn!("Failed to parse {path:?}: {e}");
-            None
-        }
-    }
+/// An XDG base directory: `$var` when it is absolute, as the spec asks,
+/// else `fallback` under `$HOME`.
+pub fn xdg_dir(var: &str, fallback: &str) -> Option<PathBuf> {
+    std::env::var_os(var)
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(fallback)))
 }
 
 /// Read just `log_level`, so the logger is up before [`load`] logs anything.
@@ -462,30 +336,24 @@ pub fn log_level(path: &Path) -> String {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|content| toml::from_str::<toml::Table>(&content).ok())
-        .and_then(|table| {
-            table
-                .get("log_level")
-                .and_then(|value| value.as_str())
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| Config::default().log_level)
+        .and_then(|table| Some(table.get("log_level")?.as_str()?.to_owned()))
+        .unwrap_or_else(|| "warn".to_owned())
 }
 
 /// Load allock's config, falling back to the defaults for anything it does
 /// not say — or for all of it, when the file is missing or malformed.
 pub fn load(path: &Path) -> Config {
-    let table = read_toml(path).unwrap_or_default();
-    if !path.exists() {
-        log::info!("No config file at {path:?}, using defaults");
-    }
-
-    match toml::Value::Table(table).try_into::<Config>() {
-        Ok(config) => config,
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
         Err(e) => {
-            log::warn!("Failed to load config {path:?}: {e}; using defaults");
-            Config::default()
+            log::info!("No config at {path:?} ({e}), using defaults");
+            return Config::default();
         }
-    }
+    };
+    toml::from_str(&content).unwrap_or_else(|e| {
+        log::warn!("Failed to load config {path:?}: {e}; using defaults");
+        Config::default()
+    })
 }
 
 /// Sessions parsed out of the standard desktop-entry directories, used when
@@ -579,57 +447,12 @@ mod tests {
     #[test]
     fn the_example_config_parses_and_shows_the_defaults() {
         let example: Config = toml::from_str(include_str!("../config.example.toml")).unwrap();
-        let (shown, defaults) = (example.appearance, Appearance::default());
-        for (shown, default) in [
-            (shown.island_color, defaults.island_color),
-            (shown.background_color, defaults.background_color),
-            (shown.primary_color, defaults.primary_color),
-            (shown.text_color, defaults.text_color),
-            (shown.success_color, defaults.success_color),
-            (shown.warning_color, defaults.warning_color),
-            (shown.danger_color, defaults.danger_color),
-        ] {
-            assert_eq!(shown, default);
-        }
-        assert_eq!(shown.opacity, defaults.opacity);
-        assert_eq!(shown.blur, defaults.blur);
+        assert_eq!(
+            example.appearance.ui(None),
+            ashell_ui::config::UiConfig::default().ui(None)
+        );
         let (seed, default) = (example.island.seed, SeedConfig::default());
         assert_eq!((seed.size, seed.top), (default.size, default.top));
-    }
-
-    #[test]
-    fn the_island_is_painted_at_its_opacity_and_its_own_alpha() {
-        let config: Config =
-            toml::from_str("[appearance]\nisland_color = \"#00000080\"\nopacity = 0.5").unwrap();
-        let island = config.appearance.island();
-        assert!((island.a - 0.5 * 128.0 / 255.0).abs() < 1e-6);
-        assert!(config.appearance.blur.enabled(island.a));
-        assert!(toml::from_str::<Config>("[appearance]\nopacity = 1.5").is_err());
-    }
-
-    #[test]
-    fn a_partial_appearance_keeps_the_other_defaults() {
-        let config: Config = toml::from_str("[appearance]\nprimary_color = \"#333333\"").unwrap();
-        assert_eq!(
-            color(config.appearance.primary_color),
-            Color::rgb(0.2, 0.2, 0.2)
-        );
-        assert_eq!(
-            config.appearance.text_color,
-            Appearance::default().text_color
-        );
-    }
-
-    #[test]
-    fn a_colour_table_from_an_earlier_config_keeps_its_base() {
-        let config: Config = toml::from_str(
-            "[appearance]\ndanger_color = { base = \"#333333\", weak = \"#000000\" }",
-        )
-        .unwrap();
-        assert_eq!(
-            color(config.appearance.danger_color),
-            Color::rgb(0.2, 0.2, 0.2)
-        );
     }
 
     #[test]

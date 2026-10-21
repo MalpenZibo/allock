@@ -4,76 +4,54 @@
 use guido::prelude::*;
 
 use super::Screen;
-use super::card::{battery_ring, caps_chip, lockout_chip};
+use super::card::{caps_chip, gauge, lockout_chip};
 use crate::Mode;
-use ashell_ui::roll;
-use ashell_ui::{Icon, icon};
+use ashell_ui::text::typed;
+use ashell_ui::tokens::{icon as icon_box, size};
+use ashell_ui::typography::LABEL_SMALL;
+use ashell_ui::{Icon, centered_row, icon, roll, ui};
+
+/// The bar's compact island's, so the one becomes the other.
+pub const HEIGHT: f32 = 34.0;
 
 pub fn view(screen: &Screen, controls: Signal<bool>) -> Container {
-    let theme = screen.theme;
+    let t = ui();
     let flow = screen.flow;
-    let now = screen.now;
-    let time_format = screen.config.clock.time_format.clone();
-    let time = create_memo(move || now.get().format(&time_format).to_string());
+    let time = screen.time;
     let hint = match screen.mode {
         Mode::Greeter => screen.host.to_string(),
         Mode::Lock | Mode::Preview => "type to unlock".to_owned(),
     };
 
     container()
-        .height(34.0)
-        .padding(Padding {
-            top: 0.0,
-            right: 10.0,
-            bottom: 0.0,
-            left: 13.0,
-        })
-        .layout(
-            Flex::row()
-                .spacing(9.0)
-                .cross_alignment(CrossAlignment::Center)
-                .main_alignment(MainAlignment::Center),
-        )
+        .height(HEIGHT)
+        .padding([0.0, 10.0, 0.0, 12.0])
+        .layout(centered_row(size::S2.px()).main_alignment(MainAlignment::Center))
         .on_click(move || flow.wake())
         .child(icon(
             match screen.mode {
                 Mode::Greeter => Icon::Power,
                 Mode::Lock | Mode::Preview => Icon::Lock,
             },
-            14.0,
-            theme.colors.sub,
+            icon_box::XSMALL.px(),
+            t.colors.sub,
         ))
         .child(
             container()
                 .visible(move || !controls.get())
-                .child(roll::rolling(
-                    time,
-                    roll::Look {
-                        size: 13.0,
-                        line: 16.0,
-                        weight: FontWeight::SEMI_BOLD,
-                        spacing: 0.0,
-                    },
-                    move || theme.colors.text,
-                )),
+                .child(roll::rolling(time).color(t.colors.text)),
         )
-        .child(lockout_chip(screen, false))
-        .child(caps_chip(screen, "Caps"))
+        .child(lockout_chip(screen.auth.state.locked))
+        .child(caps_chip("Caps"))
         .child({
             let user = screen.user;
             let greeter = screen.mode == Mode::Greeter;
             // The greeter has nobody yet: it names the machine instead.
             move || {
                 let name = user.get().filter(|_| !greeter)?.display_name;
-                Some(
-                    text(name)
-                        .font_size(12.0)
-                        .font_weight(FontWeight::SEMI_BOLD)
-                        .color(theme.colors.sub)
-                        .nowrap(),
-                )
+                Some(typed(name, LABEL_SMALL.em()).color(t.colors.sub).nowrap())
             }
         })
-        .child(text(hint).font_size(12.0).color(theme.colors.dim).nowrap())
-        .child(battery_ring(screen, 18.0))
+        .child(typed(hint, LABEL_SMALL).color(t.colors.dim).nowrap())
+        .child(gauge(screen.battery, icon_box::SMALL))
 }

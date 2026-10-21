@@ -12,10 +12,11 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use guido::prelude::WriteSignal;
 use tokio::sync::{mpsc, watch};
-use zbus::proxy;
 use zbus::OwnedObjectPath;
+use zbus::proxy;
 
 use super::{AuthEvent, FingerprintConfig, FingerprintState};
+use crate::services::logind::{self, ManagerProxy};
 
 #[proxy(
     interface = "net.reactivated.Fprint.Manager",
@@ -45,16 +46,6 @@ pub trait FprintDevice {
     fn finger_present(&self) -> zbus::Result<bool>;
 }
 
-#[proxy(
-    interface = "org.freedesktop.login1.Manager",
-    default_service = "org.freedesktop.login1",
-    default_path = "/org/freedesktop/login1"
-)]
-trait Login1Manager {
-    #[zbus(signal)]
-    fn prepare_for_sleep(&self, start: bool) -> zbus::Result<()>;
-}
-
 /// Consecutive reader failures before giving up until the next resume. With
 /// [`backoff`], just under a minute: enough to outlast a `sudo`'s `pam_fprintd`.
 const MAX_FAILURES: u32 = 8;
@@ -64,7 +55,7 @@ pub async fn run(
     event_tx: mpsc::Sender<AuthEvent>,
     state: WriteSignal<FingerprintState>,
 ) {
-    let connection = match zbus::Connection::system().await {
+    let connection = match logind::system().await {
         Ok(connection) => connection,
         Err(e) => {
             log::info!("fingerprint unavailable: {e}");
@@ -77,15 +68,24 @@ pub async fn run(
     // Kept across restarts: a suspend must not reset the tries.
     let mut misses = 0;
     let mut failures = 0;
+    // Outlives the round, so a suspend can leave it held until the resume.
+    let mut claim = None;
 
     loop {
         let woke = tokio::select! {
-            ended = verify_loop(&connection, &config, &event_tx, state, &mut misses, &mut failures) => {
+            // A suspend first: the reader's error at suspend comes after it,
+            // and must not be taken for a broken reader released at once.
+            biased;
+            Some(asleep) = sleeps.next() => Wake::Sleep(asleep),
+            ended = verify_loop(&connection, &config, &event_tx, state, &mut misses, &mut failures, &mut claim) => {
                 Wake::Ended(ended)
             }
-            Some(asleep) = sleeps.next() => Wake::Sleep(asleep),
             () = became_idle(&mut idle) => Wake::Idle,
         };
+
+        if !matches!(woke, Wake::Sleep(true)) {
+            release(&mut claim).await;
+        }
 
         match woke {
             // The loop already set the state the user must see; keep it.
@@ -96,11 +96,16 @@ pub async fn run(
             }
             Wake::Ended(Ok(Ended::Broken(reason))) => failures = broke(&reason, failures),
             Wake::Ended(Err(e)) => failures = broke(&e.to_string(), failures),
-            // Round and claim dropped; fprintd cancels verification on
-            // suspend, so wait for the resume before claiming again.
+            // libfprint cancels the scan on suspend, so the claim held through
+            // it does not keep the sensor reading. It is released only after
+            // the resume: a release while the reader is suspended fails, and
+            // fprintd then drops the claim but leaves the reader open, so
+            // every later claim fails until fprintd exits. The bus delivers
+            // the resume to fprintd before this release.
             Wake::Sleep(true) => {
                 state.set(FingerprintState::Unavailable);
                 until_resumed(&mut sleeps).await;
+                release(&mut claim).await;
                 failures = 0;
                 continue;
             }
@@ -163,7 +168,7 @@ fn backoff(failures: u32) -> Duration {
 
 /// Never ends, even without logind, so a `select!` on it cannot spin.
 async fn sleep_signals(connection: &zbus::Connection) -> BoxStream<'static, bool> {
-    let signals = match Login1ManagerProxy::new(connection).await {
+    let signals = match ManagerProxy::new(connection).await {
         Ok(logind) => logind.receive_prepare_for_sleep().await.ok(),
         Err(_) => None,
     };
@@ -261,6 +266,7 @@ async fn verify_loop(
     state: WriteSignal<FingerprintState>,
     misses: &mut u32,
     failures: &mut u32,
+    claim: &mut Option<ClaimGuard>,
 ) -> zbus::Result<Ended> {
     // A reader that reappears is at a new path.
     let manager = FprintManagerProxy::new(connection).await?;
@@ -280,9 +286,9 @@ async fn verify_loop(
         return Ok(Ended::NoFingers);
     }
 
-    // Claiming is exclusive; the guard releases it when the task is dropped.
+    // Claiming is exclusive; the caller releases it.
     device.claim(&config.user).await?;
-    let _guard = ClaimGuard(device.clone());
+    *claim = Some(ClaimGuard(Some(device.clone())));
 
     let mut status = device.receive_verify_status().await?;
     let mut finger = device.receive_finger_present_changed().await;
@@ -294,7 +300,7 @@ async fn verify_loop(
     while *misses < config.retries {
         device.verify_start("any").await?;
 
-        let done = loop {
+        loop {
             let status = tokio::select! {
                 status = status.next() => status,
                 Some(change) = finger.next() => {
@@ -346,33 +352,49 @@ async fn verify_loop(
             }
 
             if args.done {
-                break true;
+                break;
             }
-        };
-
-        if done {
-            // fprintd requires a stop between verification rounds.
-            let _ = device.verify_stop().await;
         }
+
+        // fprintd requires a stop between verification rounds.
+        let _ = device.verify_stop().await;
     }
 
     state.set(FingerprintState::Exhausted);
     Ok(Ended::Settled)
 }
 
-/// Releases the device however the loop ends, cancellation included. fprintd
-/// also drops the claim when the bus connection closes.
-struct ClaimGuard(FprintDeviceProxy<'static>);
+/// A claim on the device, released with [`release`], or on drop if the task
+/// ends first. fprintd also drops the claim when the bus connection closes.
+struct ClaimGuard(Option<FprintDeviceProxy<'static>>);
+
+impl ClaimGuard {
+    async fn release(mut self) {
+        if let Some(device) = self.0.take() {
+            let _ = device.verify_stop().await;
+            if let Err(e) = device.release().await {
+                log::info!("fingerprint reader not released: {e}");
+            }
+        }
+    }
+}
 
 impl Drop for ClaimGuard {
     fn drop(&mut self) {
-        let device = self.0.clone();
+        let Some(device) = self.0.take() else { return };
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 let _ = device.verify_stop().await;
                 let _ = device.release().await;
             });
         }
+    }
+}
+
+/// Awaited, so the next claim cannot overtake it.
+async fn release(claim: &mut Option<ClaimGuard>) {
+    if let Some(claim) = claim.take() {
+        claim.release().await;
     }
 }
 

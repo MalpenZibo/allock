@@ -15,7 +15,7 @@ path = "src/main.rs"
 guido = { git = "https://github.com/MalpenZibo/guido", branch = "main" }
 # The island's components, shared with ashell. Only on ashell's local
 # feat/experimental-ui branch for now; a git dependency once it is pushed.
-ashell-ui = { path = "../ashell/experimental/crates/ashell-ui" }
+ashell-ui = { path = "../ashell/experimental/crates/ashell-ui", features = ["serde"] }
 # Battery, shared with ashell.
 ashell-services = { git = "https://github.com/MalpenZibo/ashell", branch = "main", features = ["upower"] }
 
@@ -27,7 +27,6 @@ futures = "0.3"
 # Config
 serde = { version = "1", features = ["derive"] }
 toml = "1"
-hex_color = { version = "3", features = ["serde"] }
 serde_json = "1"
 
 

@@ -6,5 +6,6 @@ pub mod battery;
 pub mod clock;
 pub mod handoff;
 pub mod idle;
+pub mod logind;
 pub mod power;
 pub mod snapshot;
