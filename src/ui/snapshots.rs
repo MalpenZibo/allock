@@ -335,3 +335,105 @@ fn snapshots() {
     greeter.settle(Phase::Gone);
     greeter.save("greeter-3-gone");
 }
+
+/// The lock in action, as raw RGBA frames at 60 fps in
+/// `target/snapshots/demo.rgba`, for `scripts/demo.sh` to make the README's
+/// animation of. Paced on the wall clock, as the flow's timers are.
+#[test]
+#[ignore = "records a video, asserts nothing"]
+fn demo() {
+    use std::io::Write;
+
+    const FRAME: Duration = Duration::from_nanos(1_000_000_000 / 60);
+
+    struct Recorder {
+        out: std::io::BufWriter<std::fs::File>,
+        next: Instant,
+    }
+
+    impl Recorder {
+        fn record(&mut self, scene: &mut Scene, span: Duration) {
+            let end = self.next + span;
+            while self.next < end {
+                if let Some(wait) = self.next.checked_duration_since(Instant::now()) {
+                    std::thread::sleep(wait);
+                }
+                scene.clock = scene.clock.max(self.next);
+                scene.app.step_at(scene.clock);
+                self.out
+                    .write_all(&scene.app.read_frame(scene.surface))
+                    .unwrap();
+                self.next += FRAME;
+            }
+        }
+    }
+
+    // The session's own picture, as the lock takes it: sharp, then blurred.
+    let desk = ::image::open(wallpaper())
+        .unwrap()
+        .resize_exact(WIDTH, HEIGHT, ::image::imageops::FilterType::Triangle)
+        .into_rgba8();
+    let snapshot = crate::services::snapshot::Snapshot {
+        width: WIDTH,
+        height: HEIGHT,
+        pixels: desk.into_raw().into(),
+    };
+    let snapshots: super::Snapshots = std::sync::Arc::new([("eDP-1".to_owned(), snapshot)].into());
+    let Some(mut lock) = Scene::with(Mode::Lock, snapshots, |config| {
+        config.appearance.material = ashell_ds::ui::Material::Translucent;
+    }) else {
+        eprintln!("no GPU adapter; nothing recorded");
+        return;
+    };
+    let path = out_dir().join("demo.rgba");
+    let mut rec = Recorder {
+        out: std::io::BufWriter::new(std::fs::File::create(&path).unwrap()),
+        next: Instant::now(),
+    };
+    let state = lock.screen.auth.state;
+    let flow = lock.screen.flow;
+    let typing = |rec: &mut Recorder, lock: &mut Scene, word: &str| {
+        for n in 1..=word.chars().count() {
+            state
+                .password
+                .set(Secret::from(word.chars().take(n).collect::<String>()));
+            rec.record(lock, Duration::from_millis(130));
+        }
+    };
+
+    // The session, then the island dropping in, at rest.
+    rec.record(&mut lock, Duration::from_millis(600));
+    flow.phase.set(Phase::Rest);
+    rec.record(&mut lock, Duration::from_millis(1600));
+    // A key wakes it into the card.
+    flow.wake();
+    rec.record(&mut lock, Duration::from_millis(1300));
+    // A wrong password: the island shakes and glows red.
+    typing(&mut rec, &mut lock, "hunter2");
+    rec.record(&mut lock, Duration::from_millis(300));
+    state.busy.set(true);
+    rec.record(&mut lock, Duration::from_millis(500));
+    state.busy.set(false);
+    state.password.clear();
+    state.notice.set(Some(Notice {
+        level: NoticeLevel::Error,
+        text: "Wrong password".to_owned(),
+    }));
+    state.tally.set(Some(crate::system::faillock::Tally {
+        failed: 1,
+        deny: 3,
+        lockout: Some(Duration::from_secs(600)),
+    }));
+    state.rejections.update(|n| *n += 1);
+    rec.record(&mut lock, Duration::from_millis(1500));
+    // The right one: the tick, and the island goes back up.
+    typing(&mut rec, &mut lock, "correct horse");
+    rec.record(&mut lock, Duration::from_millis(300));
+    state.busy.set(true);
+    rec.record(&mut lock, Duration::from_millis(500));
+    state.busy.set(false);
+    state.authenticated.set(true);
+    rec.record(&mut lock, Duration::from_millis(2600));
+    rec.out.flush().unwrap();
+    println!("{}", path.display());
+}

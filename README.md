@@ -13,6 +13,9 @@
 > This project has been developed with the assistance of AI.
 
 <p align="center">
+  <img src="assets/screenshots/demo.webp" alt="The lock in action: the island drops in, refuses a wrong password, takes the right one and goes back up" width="100%">
+</p>
+<p align="center">
   <img src="assets/screenshots/lock.webp" alt="The lock screen" width="100%">
 </p>
 <p align="center">
