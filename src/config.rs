@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use ashell_ds::config::UiConfig;
 use serde::Deserialize;
+use styletto::theme::config::UiConfig;
 
 /// Everything but `log_level`, which [`log_level`] reads before the logger
 /// is up.
@@ -21,7 +21,7 @@ pub struct Config {
     pub auth: AuthConfig,
     pub indicators: IndicatorsConfig,
     pub greeter: GreeterConfig,
-    /// ashell-ds's own `[appearance]` table, read as ashell reads it.
+    /// styletto's own `[appearance]` table.
     pub appearance: UiConfig,
     pub island: IslandConfig,
     pub handoff: HandoffConfig,
@@ -449,7 +449,7 @@ mod tests {
         let example: Config = toml::from_str(include_str!("../config.example.toml")).unwrap();
         assert_eq!(
             example.appearance.ui(None),
-            ashell_ds::config::UiConfig::default().ui(None)
+            styletto::theme::config::UiConfig::default().ui(None)
         );
         let (seed, default) = (example.island.seed, SeedConfig::default());
         assert_eq!((seed.size, seed.top), (default.size, default.top));

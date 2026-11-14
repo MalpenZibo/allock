@@ -5,11 +5,12 @@ use guido::prelude::*;
 
 use super::Screen;
 use super::flow::Phase;
-use ashell_ds::text::typed;
-use ashell_ds::tokens::size;
-use ashell_ds::typography::{Resolved, TITLE_MEDIUM};
-use ashell_ds::ui;
-use ashell_ds::{motion, roll};
+use styletto::components::roll;
+use styletto::foundations::motion;
+use styletto::foundations::tokens::size;
+use styletto::foundations::typography::{Resolved, TITLE_MEDIUM};
+use styletto::primitives::text::typed;
+use styletto::ui;
 
 /// The time's size and line, and how close its figures sit: past the type
 /// scale, which stops at the island's numbers.

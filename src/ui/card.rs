@@ -13,16 +13,18 @@ use crate::services::auth::{FingerprintState, Lock, NoticeLevel, Tally};
 use crate::services::battery::Battery;
 use crate::services::power::PowerAction;
 use crate::system::user::UserInfo;
-use ashell_ds::badge::dot;
-use ashell_ds::button::chip_button;
-use ashell_ds::chip::{Chip, chip};
-use ashell_ds::control::Size;
-use ashell_ds::motion::{self, armed};
-use ashell_ds::progress::{battery_ink, ring};
-use ashell_ds::text::{caption, heading, typed};
-use ashell_ds::tokens::{IconSize, icon as icon_box, radius, size, stroke};
-use ashell_ds::typography as ty;
-use ashell_ds::{Icon, centered_row, icon, list, roll, ui};
+use styletto::components::badge::dot;
+use styletto::components::button::chip_button;
+use styletto::components::chip::{Chip, chip};
+use styletto::components::list;
+use styletto::components::progress::{battery_ink, ring};
+use styletto::components::roll;
+use styletto::foundations::control::Size;
+use styletto::foundations::motion::{self, armed};
+use styletto::foundations::tokens::{IconSize, icon as icon_box, radius, size, stroke};
+use styletto::foundations::typography as ty;
+use styletto::primitives::text::{caption, heading, typed};
+use styletto::{Icon, centered_row, icon, ui};
 
 const WIDTH: f32 = 400.0;
 /// The avatar, and how far the fingerprint ring stands off it.

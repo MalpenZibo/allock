@@ -11,12 +11,10 @@ name = "allock"
 path = "src/main.rs"
 
 [dependencies]
-# The island needs main: group blur, arcs, tabular figures, inset shadows.
-guido = { git = "https://github.com/MalpenZibo/guido", branch = "main" }
-# ashell's design system: tokens, themes, components and the [appearance]
-# table, with themes made from a seed or a wallpaper. Only on ashell's local
-# feat/experimental-ui branch for now; a git dependency once it is pushed.
-ashell-ds = { path = "../ashell/experimental/ashell-ds", features = ["serde", "wallpaper"] }
+guido = "0.13"
+# The design system: tokens, themes, components and the [appearance] table,
+# with themes made from a seed or a wallpaper.
+styletto = { git = "https://github.com/MalpenZibo/styletto", branch = "main", features = ["serde", "wallpaper"] }
 # Battery, shared with ashell.
 ashell-services = { git = "https://github.com/MalpenZibo/ashell", branch = "main", features = ["upower"] }
 
@@ -54,7 +52,7 @@ log = "0.4"
 env_logger = "0.11"
 
 [dev-dependencies]
-guido = { git = "https://github.com/MalpenZibo/guido", branch = "main", features = ["testing"] }
+guido = { version = "0.13", features = ["testing"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]

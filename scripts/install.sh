@@ -167,7 +167,7 @@ if [[ $GREETER -eq 1 ]]; then
             echo "    note: the greeter cannot read appearance.wallpaper in your home; it falls back to the theme"
         fi
     else
-        echo "    no [appearance] in $USER_CONFIG; the greeter wears ashell-ds's default look"
+        echo "    no [appearance] in $USER_CONFIG; the greeter wears styletto's default look"
     fi
 
     MAIN_OUTPUT_LINE="$(toml_line main_output "$USER_CONFIG")"

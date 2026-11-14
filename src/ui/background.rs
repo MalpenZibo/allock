@@ -10,7 +10,7 @@ use super::Screen;
 use super::flow::Phase;
 use crate::Mode;
 use crate::config::BackgroundFit;
-use ashell_ds::motion;
+use styletto::foundations::motion;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Look {

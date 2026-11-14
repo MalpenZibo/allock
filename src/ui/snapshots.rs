@@ -290,7 +290,7 @@ fn snapshots() {
 
     // A translucent island softens the session through it.
     let mut glass = Scene::with(Mode::Lock, snapshots, |config| {
-        config.appearance.material = ashell_ds::ui::Material::Glass;
+        config.appearance.material = styletto::ui::Material::Glass;
     })
     .unwrap();
     glass.save("translucent-0-seed");
@@ -380,7 +380,7 @@ fn demo() {
     };
     let snapshots: super::Snapshots = std::sync::Arc::new([("eDP-1".to_owned(), snapshot)].into());
     let Some(mut lock) = Scene::with(Mode::Lock, snapshots, |config| {
-        config.appearance.material = ashell_ds::ui::Material::Translucent;
+        config.appearance.material = styletto::ui::Material::Translucent;
     }) else {
         eprintln!("no GPU adapter; nothing recorded");
         return;

@@ -10,11 +10,11 @@ use guido::prelude::*;
 use super::Screen;
 use super::flow::Phase;
 use crate::Mode;
-use ashell_ds::button::{Fill, icon_button};
-use ashell_ds::control::Size;
-use ashell_ds::input::password_field;
-use ashell_ds::typography::{LABEL_LARGE, Typeset};
-use ashell_ds::{Icon, ui};
+use styletto::components::button::{Fill, icon_button};
+use styletto::components::input::password_field;
+use styletto::foundations::control::Size;
+use styletto::foundations::typography::{LABEL_LARGE, Typeset};
+use styletto::{Icon, ui};
 
 /// The input the keyboard types into, kept out of sight.
 pub fn keyboard(screen: &Screen) -> Container {

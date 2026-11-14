@@ -1,15 +1,15 @@
-//! The island: ashell-ds's shape, at the top centre, showing the seed, the
+//! The island: styletto's shape, at the top centre, showing the seed, the
 //! rest, the card or the tick, and coming down to meet whoever types.
 
 use guido::prelude::*;
 
 use super::flow::Phase;
 use super::{Screen, card, rest};
-use ashell_ds::control::Size;
-use ashell_ds::island::{self, above_edge, island};
-use ashell_ds::motion::{self, shake};
-use ashell_ds::tokens::{icon as icon_box, radius, size, stroke};
-use ashell_ds::ui;
+use styletto::foundations::control::Size;
+use styletto::foundations::motion::{self, shake};
+use styletto::foundations::tokens::{icon as icon_box, radius, size, stroke};
+use styletto::primitives::island::{self, above_edge, island};
+use styletto::ui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum View {

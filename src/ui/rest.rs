@@ -6,10 +6,11 @@ use guido::prelude::*;
 use super::Screen;
 use super::card::{caps_chip, gauge, lockout_chip};
 use crate::Mode;
-use ashell_ds::text::typed;
-use ashell_ds::tokens::{icon as icon_box, size};
-use ashell_ds::typography::LABEL_SMALL;
-use ashell_ds::{Icon, centered_row, icon, roll, ui};
+use styletto::components::roll;
+use styletto::foundations::tokens::{icon as icon_box, size};
+use styletto::foundations::typography::LABEL_SMALL;
+use styletto::primitives::text::typed;
+use styletto::{Icon, centered_row, icon, ui};
 
 /// The bar's compact island's, so the one becomes the other.
 pub const HEIGHT: f32 = 34.0;
