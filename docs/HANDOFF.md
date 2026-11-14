@@ -1,6 +1,6 @@
 # The handoff with a bar
 
-allock and a bar that draws an island (ashell) are two processes, and the
+allock and a bar that draws an island are two processes, and the
 compositor switches between them with a cut no client can animate: the session
 disappears when the lock takes the screen, and reappears in one frame when it is
 undone. The handoff makes sure no island is on screen at the cut. The bar's
@@ -13,15 +13,17 @@ Both islands go up as the **seed**, the dot of `[island.seed] size` logical
 pixels, and rest `[island.seed] top` pixels below the edge. The two configs share
 the keys but need not agree: neither island is on screen at the cut.
 
-allock works without a bar. Everything below is what changes when one is there.
+allock works without a bar, and with one that knows nothing of this: the
+handoff is off unless `[handoff] enabled = true`. Everything below is what
+changes when it is on and a bar implements it.
 
 ## The interface
 
-The bar owns `org.ashell.Island` on the **session bus** and exports
-`/org/ashell/Island` with:
+The bar owns `org.allock.Handoff` on the **session bus** and exports
+`/org/allock/Handoff` with:
 
 ```
-interface org.ashell.Island1
+interface org.allock.Handoff1
 
 method PrepareHandoff(s reason) -> (b gone)
 method ResumeAfterHandoff()
@@ -30,7 +32,7 @@ method ResumeAfterHandoff()
 `PrepareHandoff("lock")` sends the island away: whatever is open closes,
 toasts and OSDs are queued, and the island shrinks into the seed as it springs
 up past the top edge. The reply is sent **once the island is off screen**, about
-400 ms with ashell's island spring. `gone` is `false` when the bar will not go
+400 ms with the island spring below. `gone` is `false` when the bar will not go
 (it is already away, or does not want to); allock locks either way.
 
 `ResumeAfterHandoff()` lets the island drop back in, and show what was queued.
@@ -41,7 +43,7 @@ Nothing else travels over it: never a credential, an attempt or a verdict.
 
 ```
 allock                                        bar
-  NameHasOwner(org.ashell.Island)? ───────────▶ (bus)
+  NameHasOwner(org.allock.Handoff)? ──────────▶ (bus)
   PrepareHandoff("lock") ─────────────────────▶ goes up past the edge (~400 ms)
                          ◀───────────────────── gone
   [snapshot of every output, if configured:
@@ -63,9 +65,9 @@ allock                                        bar
 
 | Case | allock |
 |---|---|
-| Nobody owns `org.ashell.Island` | Locks at once: one round trip to the bus, no wait. The island comes and goes as it does with a bar. |
+| Nobody owns `org.allock.Handoff` | Locks at once: one round trip to the bus, no wait. The island comes and goes as it does with a bar. |
 | The bar does not answer within `[handoff] timeout_ms` (600) | Locks anyway: the lock is never held back for an animation. Its island may then be in the snapshot. |
-| `[handoff] enabled = false` | Never asks; behaves as without a bar. |
+| `[handoff] enabled = false` (the default) | Never asks, never connects to the session bus for it; behaves as without a bar. |
 | `ResumeAfterHandoff` is lost | The bar also drops back in on `LockedHint = false` (below). |
 
 ## What the bar does on its own
@@ -95,5 +97,5 @@ island on either side of it.
 | Value | Where |
 |---|---|
 | Where each island rests, and the seed it goes as | `[island.seed]` in each one's config (same keys, same defaults: 30 and 6; they need not match) |
-| The spring every fold and growth uses | `ashell_ds::motion::ISLAND_SPRING` (mass 1, stiffness 230, damping 21) |
+| The spring every fold and growth uses | mass 1, stiffness 230, damping 21 |
 | How long going away takes | ~400 ms, from that spring |

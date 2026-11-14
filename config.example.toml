@@ -43,21 +43,22 @@ idle_timeout = 60
 battery = true
 
 # The seed: the dot the island starts and ends as, up past the top edge, and
-# where it rests. Shared keys with ashell, though they need not match.
+# where it rests.
 [island.seed]
 size = 30.0   # diameter, logical pixels
 top = 6.0     # from the top edge, logical pixels
 
-# Before locking, ask the bar to send its island up past the top edge, over
-# org.ashell.Island1 (docs/HANDOFF.md). Without a bar allock locks at once; a
-# bar that does not answer within timeout_ms is not waited for.
+# Off by default. Enable it for a bar that draws its own island and implements
+# org.allock.Handoff1 (docs/HANDOFF.md): before locking allock asks it to send
+# the island away. A bar that is not on the bus costs one round trip; an answer
+# later than timeout_ms is not waited for.
 [handoff]
-enabled = true
+enabled = false
 timeout_ms = 600
 
 [appearance]
-# ashell-ds's own [appearance] table (its UiConfig), read as ashell reads it.
-# Unset, it is ashell-ds's default look: Tokyo Night.
+# The colours and the look of everything allock draws. Unset, it is Tokyo
+# Night.
 
 # Where the colours come from: one of a theme, a seed colour or a wallpaper.
 # A theme: "Tokyo Night", "Catppuccin", "Nord", "Gruvbox", "Dracula",
@@ -95,7 +96,7 @@ motion = "full"
 # sans = "Inter"
 # mono = "JetBrains Mono"
 
-# Colours set over each flavour, by ashell-ds's names: background (the
+# Colours set over each flavour, by name: background (the
 # island), text, sub, dim, accent, success, warning, danger, and on_accent,
 # on_success, on_warning, on_danger for what reads on each fill.
 # [appearance.dark]

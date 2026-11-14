@@ -260,8 +260,7 @@ impl Default for GreeterConfig {
     }
 }
 
-/// The island's resting place. ashell reads the same `[island.seed]`; the
-/// two need not match, since neither island is on screen at the cut.
+/// The island's resting place: the seed it grows out of and goes back into.
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(default)]
 pub struct IslandConfig {
@@ -287,8 +286,8 @@ impl Default for SeedConfig {
 }
 
 /// Coordination with a bar that sends its island up past the top edge
-/// before the lock takes the screen, over `org.ashell.Island1`. Optional: without a bar
-/// allock locks at once.
+/// before the lock takes the screen, over `org.allock.Handoff1`. Off by
+/// default: only a bar that implements it gains anything from it.
 #[derive(Deserialize, Clone, Copy, Debug)]
 #[serde(default)]
 pub struct HandoffConfig {
@@ -300,7 +299,7 @@ pub struct HandoffConfig {
 impl Default for HandoffConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             timeout_ms: 600,
         }
     }

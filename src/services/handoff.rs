@@ -1,13 +1,15 @@
-//! The handoff with ashell, over `org.ashell.Island1` on the session bus.
+//! The handoff with a bar that draws an island, over `org.allock.Handoff1` on
+//! the session bus.
 //!
-//! Before the lock takes the screen, ashell's island goes up past the top
+//! Before the lock takes the screen, the bar's island goes up past the top
 //! edge, so the session the lock covers (and the snapshot it takes of it)
 //! has no island in it; the lock's own island then drops in from the same
-//! edge. After the unlock, ashell's drops back in. See `docs/HANDOFF.md`.
+//! edge. After the unlock, the bar's drops back in. See `docs/HANDOFF.md`.
 //!
-//! Optional on purpose. Without ashell on the bus nothing is waited for; a
-//! bar that is slow or stuck costs at most `timeout_ms` before the session
-//! is locked anyway. The protocol carries "go" and "come back", never a
+//! Off unless `[handoff] enabled`: a bar that does not implement it (waybar,
+//! or none) is never asked and never waited for. Enabled, a bar missing from
+//! the bus costs one round trip, and one that is slow or stuck at most
+//! `timeout_ms` before the session is locked anyway. The protocol carries "go" and "come back", never a
 //! credential or a verdict.
 //!
 //! logind's `LockedHint` is kept as well, so a bar that starts or restarts
@@ -23,14 +25,14 @@ use zbus::proxy;
 use super::logind::{self, SessionProxy};
 use crate::config::HandoffConfig;
 
-const ISLAND: &str = "org.ashell.Island";
+const HANDOFF: &str = "org.allock.Handoff";
 
 #[proxy(
-    interface = "org.ashell.Island1",
-    default_service = "org.ashell.Island",
-    default_path = "/org/ashell/Island"
+    interface = "org.allock.Handoff1",
+    default_service = "org.allock.Handoff",
+    default_path = "/org/allock/Handoff"
 )]
-trait Island {
+trait Handoff {
     /// Sends the island up past the top edge; answers once it is gone.
     fn prepare_handoff(&self, reason: &str) -> zbus::Result<bool>;
     /// The lock is gone: the island may grow back.
@@ -130,7 +132,7 @@ async fn within(timeout: Duration, what: &str, call: impl Future<Output = zbus::
 async fn owned(bus: &zbus::Connection) -> zbus::Result<bool> {
     DBusProxy::new(bus)
         .await?
-        .name_has_owner(BusName::try_from(ISLAND)?)
+        .name_has_owner(BusName::try_from(HANDOFF)?)
         .await
         .map_err(Into::into)
 }
@@ -141,7 +143,11 @@ async fn prepare(bus: &zbus::Connection) -> zbus::Result<()> {
     if !owned(bus).await? {
         return Ok(());
     }
-    if !IslandProxy::new(bus).await?.prepare_handoff("lock").await? {
+    if !HandoffProxy::new(bus)
+        .await?
+        .prepare_handoff("lock")
+        .await?
+    {
         log::info!("the bar declined to go; locking anyway");
     }
     Ok(())
@@ -151,7 +157,7 @@ async fn resume(bus: &zbus::Connection) -> zbus::Result<()> {
     if !owned(bus).await? {
         return Ok(());
     }
-    IslandProxy::new(bus).await?.resume_after_handoff().await
+    HandoffProxy::new(bus).await?.resume_after_handoff().await
 }
 
 async fn locked_hint(locked: bool) -> zbus::Result<()> {

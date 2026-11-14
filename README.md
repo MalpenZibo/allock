@@ -31,9 +31,8 @@
   nobody is there, and back into the dot when you are in
 - Type to unlock: the key that wakes the pill is the first character of the password
 - Password through PAM, fingerprint through fprintd (lock screen only)
-- A handoff with [ashell](https://github.com/MalpenZibo/ashell): the bar folds
-  its island into the same dot before the lock appears, and grows back out of
-  it after the unlock
+- Works on its own, with any bar or none; a bar that draws an island of its
+  own can hand it over through an optional D-Bus handoff, off by default
 - Blurred wallpaper, or a snapshot of the session that blurs as the lock
   starts and sharpens as it ends, a rolling clock, battery ring, suspend, reboot and shut down
 - Multi-monitor: choose which monitors show the controls
@@ -58,12 +57,161 @@ login screen.
 ## ⚙️ Configuration
 
 allock works without a config file. To change it, copy
-[`config.example.toml`](config.example.toml) to `~/.config/allock/config.toml`:
-every key is optional and shown with its default.
+[`config.example.toml`](config.example.toml) to `~/.config/allock/config.toml`
+(`$XDG_CONFIG_HOME/allock/config.toml`, or the file given with
+`--config-path`): every key is optional and shown there with its default. A
+file allock cannot read is reported in its log, and the lock comes up with the
+defaults.
 
 The layout is fixed. The config chooses colours, wallpaper, clock format, where
 the island rests, which indicators appear and which monitors show the
 controls.
+
+### Monitors and log
+
+```toml
+log_level = "warn"                # error | warn | info | debug | trace
+main_output = "All"               # or { Targets = ["DP-2", "eDP-1"] }
+```
+
+Every monitor is covered while locked. `main_output` picks the ones that show
+the clock and the card, by connector name or part of the EDID; the others keep
+the island at rest. A target that is not connected puts the controls on the
+first monitor.
+
+### Background
+
+```toml
+[background]
+source = "Wallpaper"              # or "Snapshot"
+path = "~/Pictures/wallpaper.jpg" # unset: the island's colour, flat
+fit = "Cover"                     # Cover | Contain | Stretch
+blur = 26.0                       # 0 for a sharp picture
+dim = 0.45                        # 0.0 to 1.0
+```
+
+`"Snapshot"` starts the lock on a picture of the session, see the island and
+the handoff below; `path` stands in where the compositor cannot capture.
+
+### Clock, indicators and authentication
+
+```toml
+[clock]
+time_format = "%H:%M"             # strftime; a format with %S ticks every second
+date_format = "%A %e %B"          # "" hides the date
+
+[indicators]
+battery = true
+
+[auth]
+pam_service = "allock"            # /etc/pam.d/<name>
+fingerprint = true
+fingerprint_retries = 5
+idle_timeout = 60                 # seconds before the card folds up; 0 keeps it
+```
+
+### Island
+
+```toml
+[island.seed]
+size = 30.0                       # the dot's diameter, logical pixels
+top = 6.0                         # from the top edge
+```
+
+`[island.seed]` is the dot the island grows out of and goes back into.
+
+### Theme and appearance
+
+`[appearance]` sets the colours and the look of everything allock draws.
+Unset, it is Tokyo Night.
+
+The colours come from one of three places. A **theme**, with its flavours and
+accent by name (any case; the theme's own when unset):
+
+```toml
+[appearance]
+theme = "Catppuccin"
+dark_flavor = "Macchiato"
+light_flavor = "Latte"
+accent = "Mauve"
+```
+
+| Theme         | Dark flavours            | Light flavour |
+| ------------- | ------------------------ | ------------- |
+| `Tokyo Night` | Night, Storm, Moon       | Day           |
+| `Catppuccin`  | Mocha, Macchiato, Frappé | Latte         |
+| `Nord`        | Polar Night              | Snow Storm    |
+| `Gruvbox`     | Dark                     | Light         |
+| `Dracula`     | Dracula                  |               |
+| `Rosé Pine`   | Main, Moon               | Dawn          |
+| `Everforest`  | Dark                     | Light         |
+| `Kanagawa`    | Wave, Dragon             | Lotus         |
+
+The accents are the flavour's own colour names, like `Blue`, `Green` or
+`Magenta` for Tokyo Night; a name the flavour lacks is reported in the log.
+
+Or both flavours worked out from a **seed** colour, as Material You does, or
+from the colour that fits a **wallpaper** best (read as the lock starts, so a
+large picture makes it start later):
+
+```toml
+[appearance]
+seed = "#6750a4"                  # or: wallpaper = "~/Pictures/wallpaper.jpg"
+variant = "tonal-spot"            # tonal-spot | vibrant | expressive | content |
+                                  # fidelity | neutral | monochrome | rainbow | fruit-salad
+contrast = "standard"             # standard | medium | high
+```
+
+A wallpaper wins over a seed, and either wins over a theme. The greeter runs as
+the `greeter` user, so its wallpaper must be somewhere that user can read.
+
+The rest of the look:
+
+```toml
+[appearance]
+mode = "auto"                     # auto | dark | light; a lock cannot ask the
+                                  # desktop, so auto is dark
+density = "default"               # compact | default | comfortable
+shape = "soft"                    # square | soft | round
+material = "solid"                # solid | translucent | glass
+motion = "full"                   # full | reduced (fades only) | none
+
+[appearance.fonts]
+sans = "Inter"                    # the system's when unset
+mono = "JetBrains Mono"
+```
+
+Any colour can be set over a flavour, by name: `background` (the island),
+`text`, `sub`, `dim`, `accent`, `success`, `warning`, `danger`, and
+`on_accent`, `on_success`, `on_warning`, `on_danger` for what reads on each
+fill, as `#rrggbb` or `#rrggbbaa`:
+
+```toml
+[appearance.dark]
+accent = "#7aa2f7"
+background = "#16161ee6"
+
+[appearance.light]
+accent = "#2e7de9"
+```
+
+### Greeter
+
+The greeter reads `/etc/greetd/allock.toml`, the same keys plus `[greeter]`:
+
+```toml
+[greeter]
+other_user = true                 # offer "Other…" to type any user name
+user = "zibo"                     # preselect this account
+default_session = "Niri"          # always start on this session
+remember = true                   # start on the last user and session
+session_output = "Journal"        # or "Console"
+
+[[greeter.session]]               # your own list; unset, the installed sessions
+name = "niri"
+command = ["niri-session"]
+env = ["XDG_SESSION_TYPE=wayland"]
+```
 
 ## 🔑 Authentication
 
@@ -120,26 +268,33 @@ the lock takes the screen the compositor cuts from the session to the lock
 surface, and no client can animate that cut; when nothing is on screen at the
 cut but the background, there is nothing for the eye to see jump.
 
-Before locking, allock asks the bar to send its island up past the top edge
-over D-Bus (`org.ashell.Island1.PrepareHandoff("lock")` on the session bus),
-locks, and drops its own island in from the same edge. Unlocking does the
-reverse: the card goes up into the edge, the session comes back with the bar's
-island still away, and `ResumeAfterHandoff()` lets it drop back in. logind's
-`LockedHint` is kept too, so a bar restarted mid-lock knows to stay away.
-
 The background is the only thing the compositor still cuts. With
-`[background] source = "Snapshot"` not even that: once the bar's island is
-gone, allock takes a picture of every output through `wlr-screencopy`, starts
-the lock on it sharp and blurs it, and sharpens it again once its own island
-has gone, before handing back. The picture has no island in it to blur. It
-stays in memory and is never written anywhere; an output that cannot be
-captured, or a compositor that takes longer than half a second, gets the
-wallpaper.
+`[background] source = "Snapshot"` not even that: allock takes a picture of
+every output through `wlr-screencopy`, starts the lock on it sharp and blurs
+it, and sharpens it again once its own island has gone. It stays in memory and
+is never written anywhere; an output that cannot be captured, or a compositor
+that takes longer than half a second, gets the wallpaper.
 
-The handoff is optional: without a bar allock locks at once, and its island
-comes and goes the same way. A bar that does not answer within
-`[handoff] timeout_ms` is not waited for. [docs/HANDOFF.md](docs/HANDOFF.md)
-has the interface a bar implements. Nothing but "go" and "come back" goes over
-it. The greeter does the same on its side of the compositor switch: its island
-goes up into the edge over the wallpaper, sharpened, which is the picture the
-session starts on, and the session's bar drops in from there.
+allock needs nothing else on the desktop: whatever bar runs, or none, the lock
+comes and goes the same way. The greeter does the same on its side of the
+compositor switch: its island goes up into the edge over the wallpaper,
+sharpened, which is the picture the session starts on.
+
+### The optional handoff
+
+A bar that draws an island of its own at the top edge can keep it off the
+screen at the cut, by implementing `org.allock.Handoff1` on the session bus
+([docs/HANDOFF.md](docs/HANDOFF.md)). It is off by default, so a bar that does
+not (waybar, or none) is never asked and never waited for:
+
+```toml
+[handoff]
+enabled = true
+timeout_ms = 600                  # how long the bar has to go
+```
+
+Enabled, allock calls `PrepareHandoff("lock")` before locking, and once the
+answer comes, or `timeout_ms` passes, locks and drops its own island in; after
+the unlock, `ResumeAfterHandoff()` lets the bar's island come back. When nobody
+owns the name allock locks at once, after one round trip to the bus. Nothing
+but "go" and "come back" goes over it.
