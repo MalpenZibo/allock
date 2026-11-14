@@ -161,9 +161,26 @@ if [[ $GREETER -eq 1 ]]; then
     fi
 
     APPEARANCE_BLOCK="$(toml_table appearance "$USER_CONFIG")"
+    # An imported look is copied beside the wallpaper, and the import pointed at
+    # the copy.
+    IMPORTED=""
+    import_src="$(toml_line import /dev/stdin <<<"$APPEARANCE_BLOCK" | sed -E 's/^[^"]*"([^"]*)".*/\1/')"
+    if [[ -n "$import_src" ]]; then
+        import_src="${import_src/#\~/$HOME}"
+        [[ "$import_src" = /* ]] || import_src="$(dirname "$USER_CONFIG")/$import_src"
+        if [[ -r "$import_src" ]]; then
+            sudo install -Dm644 "$import_src" "$SHARE/styletto.toml"
+            IMPORTED="$(cat "$import_src")"
+            APPEARANCE_BLOCK="$(sed -E "s|^([[:space:]]*import[[:space:]]*=).*|\1 \"$SHARE/styletto.toml\"|" <<<"$APPEARANCE_BLOCK")"
+            echo "    look: $import_src -> $SHARE/styletto.toml"
+        else
+            APPEARANCE_BLOCK="$(sed -E '/^[[:space:]]*import[[:space:]]*=/d' <<<"$APPEARANCE_BLOCK")"
+            echo "    note: cannot read the imported $import_src; the greeter takes [appearance] alone"
+        fi
+    fi
     if [[ -n "$APPEARANCE_BLOCK" ]]; then
         echo "    look: [appearance] from $USER_CONFIG"
-        if grep -qE '^[[:space:]]*wallpaper[[:space:]]*=' <<<"$APPEARANCE_BLOCK"; then
+        if grep -qE '^[[:space:]]*wallpaper[[:space:]]*=' <<<"$APPEARANCE_BLOCK"$'\n'"$IMPORTED"; then
             echo "    note: the greeter cannot read appearance.wallpaper in your home; it falls back to the theme"
         fi
     else

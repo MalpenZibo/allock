@@ -60,6 +60,11 @@ timeout_ms = 600
 # The colours and the look of everything allock draws. Unset, it is Tokyo
 # Night.
 
+# The look from a file of its own, for one shared with another program: it
+# holds the keys below, without the [appearance] header. What this table sets
+# beside it is written over it. A relative path is from this file's directory.
+# import = "~/.config/styletto/styletto.toml"
+
 # Where the colours come from: one of a theme, a seed colour or a wallpaper.
 # A theme: "Tokyo Night", "Catppuccin", "Nord", "Gruvbox", "Dracula",
 # "Rosé Pine", "Everforest" or "Kanagawa", with its flavours and accent by

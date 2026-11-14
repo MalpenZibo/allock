@@ -349,10 +349,67 @@ pub fn load(path: &Path) -> Config {
             return Config::default();
         }
     };
-    toml::from_str(&content).unwrap_or_else(|e| {
+    let parsed = toml::from_str::<toml::Table>(&content).and_then(|mut table| {
+        import_appearance(&mut table, path);
+        table.try_into::<Config>()
+    });
+    parsed.unwrap_or_else(|e| {
         log::warn!("Failed to load config {path:?}: {e}; using defaults");
         Config::default()
     })
+}
+
+/// `[appearance] import = "path"`: the look read from a file of its own, one
+/// another program can share, with the keys `[appearance]` sets beside the
+/// import written over it. The file holds what `[appearance]` would, without
+/// the header. A relative path is from the config's directory. A file that
+/// cannot be read is logged, and `[appearance]` is used as it is.
+fn import_appearance(config: &mut toml::Table, config_path: &Path) {
+    let Some(toml::Value::Table(appearance)) = config.get_mut("appearance") else {
+        return;
+    };
+    let Some(import) = appearance.remove("import") else {
+        return;
+    };
+    let Some(import) = import.as_str() else {
+        log::warn!("[appearance] import is not a path; ignored");
+        return;
+    };
+    let mut path = expand_tilde(import);
+    if path.is_relative()
+        && let Some(dir) = config_path.parent()
+    {
+        path = dir.join(path);
+    }
+    let imported = std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|content| toml::from_str::<toml::Table>(&content).map_err(|e| e.to_string()));
+    let mut imported = match imported {
+        Ok(imported) => imported,
+        Err(e) => {
+            log::warn!(
+                "Failed to import the appearance from {path:?}: {e}; using [appearance] alone"
+            );
+            return;
+        }
+    };
+    if imported.remove("import").is_some() {
+        log::warn!("{path:?} imports another file; an import is followed one level only");
+    }
+    overlay(&mut imported, std::mem::take(appearance));
+    *appearance = imported;
+}
+
+/// `over`'s keys written onto `base`, table into table.
+fn overlay(base: &mut toml::Table, over: toml::Table) {
+    for (key, value) in over {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(base)), toml::Value::Table(over)) => overlay(base, over),
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
+    }
 }
 
 /// Sessions parsed out of the standard desktop-entry directories, used when
@@ -452,6 +509,52 @@ mod tests {
         );
         let (seed, default) = (example.island.seed, SeedConfig::default());
         assert_eq!((seed.size, seed.top), (default.size, default.top));
+    }
+
+    /// A directory of its own under the system's temp, emptied first.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("allock-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn an_imported_appearance_is_read_under_the_keys_set_beside_it() {
+        let dir = scratch("import");
+        std::fs::write(
+            dir.join("styletto.toml"),
+            "theme = \"Nord\"\nmaterial = \"glass\"\n[fonts]\nsans = \"Inter\"\nmono = \"Iosevka\"\n",
+        )
+        .unwrap();
+        let config = dir.join("config.toml");
+        // Relative to the config's directory.
+        std::fs::write(
+            &config,
+            "[appearance]\nimport = \"styletto.toml\"\nmaterial = \"solid\"\n[appearance.fonts]\nmono = \"JetBrains Mono\"\n",
+        )
+        .unwrap();
+
+        let appearance = load(&config).appearance;
+        assert_eq!(appearance.theme.as_deref(), Some("Nord"));
+        assert_eq!(appearance.material, styletto::ui::Material::Solid);
+        assert_eq!(appearance.fonts.sans.as_deref(), Some("Inter"));
+        assert_eq!(appearance.fonts.mono.as_deref(), Some("JetBrains Mono"));
+    }
+
+    #[test]
+    fn an_import_that_cannot_be_read_leaves_the_rest_of_the_config() {
+        let dir = scratch("missing");
+        let config = dir.join("config.toml");
+        std::fs::write(
+            &config,
+            "[appearance]\nimport = \"nowhere.toml\"\ntheme = \"Dracula\"\n[handoff]\nenabled = true\n",
+        )
+        .unwrap();
+
+        let loaded = load(&config);
+        assert_eq!(loaded.appearance.theme.as_deref(), Some("Dracula"));
+        assert!(loaded.handoff.enabled);
     }
 
     #[test]

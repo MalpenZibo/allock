@@ -192,6 +192,21 @@ background = "#16161ee6"
 accent = "#2e7de9"
 ```
 
+The look can also come from a file of its own, shared with another program
+that wears styletto, such as ashell. It holds the same keys as `[appearance]`,
+without the header; what `[appearance]` sets beside the import is written over
+it:
+
+```toml
+[appearance]
+import = "~/.config/styletto/styletto.toml"  # relative to this file, if relative
+material = "glass"                           # this one key, for allock alone
+```
+
+A file that cannot be read is reported in the log, and `[appearance]` is used
+as it is. `scripts/install.sh --greeter` copies the imported file where the
+greeter can read it.
+
 ### Greeter
 
 The greeter reads `/etc/greetd/allock.toml`, the same keys plus `[greeter]`:
