@@ -1,5 +1,12 @@
-//! The screens drawn offscreen into PNGs under `target/snapshots`, to look
-//! at a change without locking anything:
+//! The screens drawn offscreen, to look at a change without locking
+//! anything: one scene at a time with any look, through `shot`
+//!
+//! ```sh
+//! scripts/shot.sh --list
+//! scripts/shot.sh lock/card /tmp/card.png mode=light material=glass
+//! ```
+//!
+//! or a tour of them all into `target/snapshots`:
 //!
 //! ```sh
 //! cargo test snapshots -- --ignored --nocapture
@@ -98,6 +105,15 @@ impl Scene {
         let auth = auth::start(Backend::Silent, None);
         let flow = Flow::start(auth, super::flow::FOLD_MS, || {});
         let mut screen = crate::screen(config, mode, auth, flow);
+        // One time and one machine, so the same scene draws the same pixels
+        // whenever and wherever it is drawn.
+        let now = chrono::TimeZone::with_ymd_and_hms(&chrono::Local, 2026, 11, 14, 9, 41, 0)
+            .earliest()
+            .unwrap();
+        screen.now = create_signal(now).read_only();
+        let time_format = screen.config.clock.time_format.clone();
+        screen.time = create_memo(move || now.format(&time_format).to_string());
+        screen.host = Rc::from("allock");
         screen.snapshots = snapshots;
         screen.battery = create_signal(Some(crate::services::battery::Battery {
             percent: 59,
@@ -436,4 +452,176 @@ fn demo() {
     rec.record(&mut lock, Duration::from_millis(2600));
     rec.out.flush().unwrap();
     println!("{}", path.display());
+}
+
+const SHOT_USAGE: &str = "\
+usage: scripts/shot.sh --list
+       scripts/shot.sh <scene> <out.png> [key=value]...
+
+key=value are the keys of the [appearance] table: theme, dark_flavor,
+light_flavor, accent, seed, wallpaper, variant, contrast, mode, density,
+shape, material, motion, fonts.sans, fonts.mono, dark.<colour>,
+light.<colour>.";
+
+/// The keys of the `[appearance]` table, and the tables whose keys are free.
+const SHOT_KEYS: &[&str] = &[
+    "theme",
+    "dark_flavor",
+    "light_flavor",
+    "accent",
+    "seed",
+    "wallpaper",
+    "variant",
+    "contrast",
+    "mode",
+    "density",
+    "shape",
+    "material",
+    "motion",
+    "fonts.sans",
+    "fonts.mono",
+];
+const SHOT_TABLES: &[&str] = &["dark.", "light."];
+
+/// Every scene `shot` draws, each a state the screen rests in, so the same
+/// arguments give the same pixels.
+const SHOT_SCENES: &[(&str, &str)] = &[
+    (
+        "lock/seed",
+        "the lock's first frame: the island up past the edge",
+    ),
+    ("lock/rest", "the island at rest, with the clock"),
+    ("lock/card", "the card, awake"),
+    ("lock/typed", "a password typed into the field"),
+    (
+        "lock/refused",
+        "a wrong password, two of three tries used, caps lock on",
+    ),
+    ("lock/power", "the power drawer open"),
+    ("lock/lockout", "faillock's lockout counting down"),
+    ("snapshot/rest", "at rest over the session's own picture"),
+    ("snapshot/card", "the card over the session's own picture"),
+    ("greeter/rest", "the greeter at rest"),
+    ("greeter/card", "the greeter's card, with its user picker"),
+    ("greeter/sessions", "the greeter's session picker open"),
+];
+
+/// One scene drawn into a PNG, for `scripts/shot.sh`, which passes its
+/// arguments in `ALLOCK_SHOT`, one per line, and the directory it was run
+/// from in `ALLOCK_SHOT_CWD`.
+#[test]
+#[ignore = "run through scripts/shot.sh"]
+fn shot() {
+    let args = std::env::var("ALLOCK_SHOT").unwrap_or_default();
+    let args: Vec<&str> = args.lines().filter(|a| !a.is_empty()).collect();
+    if args.contains(&"--list") {
+        for (name, what) in SHOT_SCENES {
+            println!("{name:<18} {what}");
+        }
+        return;
+    }
+    if args.is_empty() || args.contains(&"--help") || args.contains(&"-h") {
+        println!("{SHOT_USAGE}");
+        return;
+    }
+    let (positional, pairs): (Vec<&str>, Vec<&str>) =
+        args.iter().partition(|arg| !arg.contains('='));
+    let [scene, out] = <[&str; 2]>::try_from(positional)
+        .unwrap_or_else(|_| panic!("expected a scene and an output file\n\n{SHOT_USAGE}"));
+    if !SHOT_SCENES.iter().any(|(name, _)| *name == scene) {
+        panic!("no scene {scene:?}: `scripts/shot.sh --list` names them");
+    }
+
+    let mut table = String::new();
+    for pair in pairs {
+        let (key, value) = pair.split_once('=').unwrap();
+        let key = key.trim();
+        if !SHOT_KEYS.contains(&key) && !SHOT_TABLES.iter().any(|t| key.starts_with(t)) {
+            panic!("unknown appearance key {key:?}\n\n{SHOT_USAGE}");
+        }
+        let value = value.trim().replace('\\', "\\\\").replace('"', "\\\"");
+        table.push_str(&format!("{key} = \"{value}\"\n"));
+    }
+    let appearance: styletto::theme::config::UiConfig =
+        toml::from_str(&table).unwrap_or_else(|e| panic!("appearance: {e}"));
+
+    let mode = if scene.starts_with("greeter/") {
+        Mode::Greeter
+    } else {
+        Mode::Lock
+    };
+    let snapshots: super::Snapshots = if scene.starts_with("snapshot/") {
+        let desk = ::image::open(wallpaper())
+            .unwrap()
+            .resize_exact(WIDTH, HEIGHT, ::image::imageops::FilterType::Triangle)
+            .into_rgba8();
+        let snapshot = crate::services::snapshot::Snapshot {
+            width: WIDTH,
+            height: HEIGHT,
+            pixels: desk.into_raw().into(),
+        };
+        std::sync::Arc::new([("eDP-1".to_owned(), snapshot)].into())
+    } else {
+        Default::default()
+    };
+    let Some(mut s) = Scene::with(mode, snapshots, |config| config.appearance = appearance) else {
+        panic!("no GPU adapter; nothing drawn");
+    };
+
+    let state = s.screen.auth.state;
+    let flow = s.screen.flow;
+    let state_of = scene.split_once('/').unwrap().1;
+    if state_of != "seed" {
+        s.settle(Phase::Rest);
+    }
+    if !matches!(state_of, "seed" | "rest") {
+        s.settle(Phase::Awake);
+    }
+    match state_of {
+        "typed" => {
+            state.password.set(Secret::from("hunter2".to_owned()));
+            s.run(Duration::from_millis(600));
+        }
+        "refused" => {
+            state.notice.set(Some(Notice {
+                level: NoticeLevel::Error,
+                text: "Wrong password".to_owned(),
+            }));
+            state.tally.set(Some(crate::system::faillock::Tally {
+                failed: 2,
+                deny: 3,
+                lockout: Some(Duration::from_secs(600)),
+            }));
+            flow.caps_at_refusal.set(true);
+            s.run(Duration::from_millis(800));
+        }
+        "power" => {
+            flow.zone.set(Some(super::flow::Zone::Power));
+            s.run(Duration::from_millis(800));
+        }
+        "lockout" => {
+            state.locked.set(Some(crate::system::faillock::Lock::Until(
+                std::time::SystemTime::now() + Duration::from_secs(272),
+            )));
+            s.run(Duration::from_millis(800));
+        }
+        "sessions" => {
+            flow.zone.set(Some(super::flow::Zone::Session));
+            s.run(Duration::from_millis(800));
+        }
+        _ => {}
+    }
+
+    let mut path = PathBuf::from(out);
+    if path.is_relative()
+        && let Some(cwd) = std::env::var_os("ALLOCK_SHOT_CWD")
+    {
+        path = PathBuf::from(cwd).join(path);
+    }
+    let pixels = s.app.read_frame(s.surface);
+    ::image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
+        .unwrap()
+        .save(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    println!("{} ({WIDTH}x{HEIGHT})", path.display());
 }
