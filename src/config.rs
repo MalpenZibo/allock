@@ -27,6 +27,28 @@ pub struct Config {
     pub handoff: HandoffConfig,
 }
 
+/// The look `[appearance]` asks for. A lock comes up before it could ask the
+/// desktop which side it prefers: `mode = "auto"` shows the dark one.
+///
+/// A wallpaper is read here, before anything shows. styletto would read it on
+/// a thread and show the theme meanwhile, and the island would change colour
+/// as it comes up. One that can't be read is reported, and the seed, or the
+/// theme, shows instead.
+pub fn look(appearance: &UiConfig) -> styletto::Ui {
+    let Some(path) = appearance.wallpaper_path() else {
+        return appearance.ui(None);
+    };
+    match styletto::theme::material::seeds(&path) {
+        Ok(colors) => appearance.with_wallpaper_colors(&colors).ui(None),
+        Err(err) => {
+            log::warn!("appearance.wallpaper {}: {err}", path.display());
+            let mut appearance = appearance.clone();
+            appearance.wallpaper = None;
+            appearance.ui(None)
+        }
+    }
+}
+
 /// Which outputs something is drawn on.
 #[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub enum Outputs {
@@ -517,6 +539,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_wallpaper_is_read_before_the_look_is_made() {
+        let dir = scratch("wallpaper");
+        let picture = dir.join("red.png");
+        ::image::RgbaImage::from_pixel(16, 16, ::image::Rgba([200, 30, 40, 255]))
+            .save(&picture)
+            .unwrap();
+        let theme = UiConfig::default().ui(None);
+
+        let mut appearance = UiConfig {
+            wallpaper: Some(picture.display().to_string()),
+            ..UiConfig::default()
+        };
+        // Its colours, at once: not the theme while styletto reads it.
+        assert_ne!(look(&appearance), theme);
+
+        // One that can't be read shows the theme.
+        appearance.wallpaper = Some(dir.join("missing.png").display().to_string());
+        assert_eq!(look(&appearance), theme);
     }
 
     #[test]

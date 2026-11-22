@@ -132,9 +132,7 @@ fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
     );
     let time_format = config.clock.time_format.clone();
     Screen {
-        // A lock comes up before it could ask the desktop which side it
-        // prefers: `mode = "auto"` shows the dark one.
-        ui: config.appearance.ui(None),
+        ui: config::look(&config.appearance),
         wallpaper: config.background.resolved_path().map(Rc::from),
         time: create_memo(move || now.get().format(&time_format).to_string()),
         now,
