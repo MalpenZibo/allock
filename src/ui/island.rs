@@ -60,9 +60,9 @@ pub fn view(screen: &Screen, controls: Signal<bool>, height: Signal<f32>) -> Con
     let t = ui();
     let ring = move || match glow.get() {
         Glow::None => Color::TRANSPARENT,
-        Glow::Error => t.colors.danger,
-        Glow::Ok => t.colors.success,
-        Glow::Warning => t.colors.warning,
+        Glow::Error => t.colors.danger.fill,
+        Glow::Ok => t.colors.success.fill,
+        Glow::Warning => t.colors.warning.fill,
     };
     // The card's corners are the field's, its padding out, so the curves
     // stay concentric.
@@ -120,6 +120,6 @@ fn ok() -> Container {
         .child(super::tick::tick(
             side,
             stroke::HEAVY * side / 24.0,
-            ui().colors.success,
+            ui().colors.success.text,
         ))
 }

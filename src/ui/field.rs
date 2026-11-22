@@ -10,7 +10,7 @@ use guido::prelude::*;
 use super::Screen;
 use super::flow::Phase;
 use crate::Mode;
-use styletto::components::button::{Fill, icon_button};
+use styletto::components::button::{Fill, button};
 use styletto::components::input::password_field;
 use styletto::foundations::control::Size;
 use styletto::foundations::typography::{LABEL_LARGE, Typeset};
@@ -163,7 +163,8 @@ fn reveal(flow: super::flow::Flow) -> impl Widget {
             Icon::Eye
         }
     };
-    icon_button(kind)
+    button()
+        .icon(move || Some(kind()))
         .size(Size::Sm)
         .fill(Fill::Ghost)
         .on_click(move || flow.reveal.update(|shown| *shown = !*shown))

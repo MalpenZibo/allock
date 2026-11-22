@@ -14,11 +14,12 @@ use crate::services::battery::Battery;
 use crate::services::power::PowerAction;
 use crate::system::user::UserInfo;
 use styletto::components::badge::dot;
-use styletto::components::button::chip_button;
-use styletto::components::chip::{Chip, chip};
+use styletto::components::button::button;
+use styletto::components::level::Level;
 use styletto::components::list;
-use styletto::components::progress::{battery_ink, ring};
+use styletto::components::progress::ring;
 use styletto::components::roll;
+use styletto::components::tag::{Tag, Tone, tag};
 use styletto::foundations::control::Size;
 use styletto::foundations::motion::{self, armed};
 use styletto::foundations::tokens::{IconSize, icon as icon_box, radius, size, stroke};
@@ -137,8 +138,8 @@ fn avatar(
         .corners(move || radius::pill(size.get()))
         .overflow(Overflow::Hidden)
         .gradient(LinearGradient::new(
-            t.colors.accent,
-            t.colors.danger,
+            t.colors.accent.fill,
+            t.colors.danger.fill,
             GradientDirection::Diagonal,
         ))
         .layout(Flex::column().center())
@@ -162,10 +163,10 @@ fn avatar(
                 .font_family(t.fonts.sans)
                 .font_size(mark)
                 .font_weight(FontWeight::BOLD)
-                .color(t.colors.on_accent)
+                .color(t.colors.accent.on)
                 .nowrap()
                 .into_any(),
-                None => icon(Icon::User, mark(), t.colors.on_accent).into_any(),
+                None => icon(Icon::User, mark(), t.colors.accent.on).into_any(),
             }
         })
 }
@@ -204,10 +205,10 @@ fn fingerprint_ring(screen: &Screen) -> Container {
         // Rebuilt when the speed changes, so the endless orbit stops with it.
         .child(move || {
             let (share, color, lap_ms) = match reader.get() {
-                Reader::Off => (0.0, t.colors.accent, None),
-                Reader::Scanning => (0.2, t.colors.accent, Some(1600.0)),
-                Reader::Reading => (0.6, t.colors.accent, Some(800.0)),
-                Reader::Refused => (1.0, t.colors.danger, None),
+                Reader::Off => (0.0, t.colors.accent.fill, None),
+                Reader::Scanning => (0.2, t.colors.accent.fill, Some(1600.0)),
+                Reader::Reading => (0.6, t.colors.accent.fill, Some(800.0)),
+                Reader::Refused => (1.0, t.colors.danger.fill, None),
             };
             let ring = arc()
                 .size(side)
@@ -350,7 +351,7 @@ fn message(screen: &Screen) -> Container {
                     } else {
                         text
                     };
-                    line(None, words, t.colors.danger).child(attempts(state.tally))
+                    line(None, words, t.colors.danger.text).child(attempts(state.tally))
                 }
                 Line::LastTry(lockout) => {
                     let then = match lockout {
@@ -359,7 +360,11 @@ fn message(screen: &Screen) -> Container {
                         }
                         None => "then the account locks".to_owned(),
                     };
-                    line(None, format!("1 attempt left, {then}"), t.colors.warning)
+                    line(
+                        None,
+                        format!("1 attempt left, {then}"),
+                        t.colors.warning.text,
+                    )
                 }
                 Line::Notice(text) => line(None, text, t.colors.dim),
                 Line::Reader(reader) => {
@@ -367,10 +372,11 @@ fn message(screen: &Screen) -> Container {
                         FingerprintState::Waiting => {
                             ("Or touch the fingerprint sensor".to_owned(), t.colors.dim)
                         }
-                        FingerprintState::Reading => {
-                            ("Checking your fingerprint…".to_owned(), t.colors.accent)
-                        }
-                        FingerprintState::Retry(hint) => (hint, t.colors.warning),
+                        FingerprintState::Reading => (
+                            "Checking your fingerprint…".to_owned(),
+                            t.colors.accent.text,
+                        ),
+                        FingerprintState::Retry(hint) => (hint, t.colors.warning.text),
                         _ => (
                             "Too many fingerprint attempts — use your password".to_owned(),
                             t.colors.dim,
@@ -396,7 +402,7 @@ fn attempts(tally: RwSignal<Option<Tally>>) -> Container {
                     let used = n < tally.failed;
                     container()
                         .child(dot(if used {
-                            t.colors.danger
+                            t.colors.danger.fill
                         } else {
                             t.colors.surface2
                         }))
@@ -417,8 +423,10 @@ fn attempts(tally: RwSignal<Option<Tally>>) -> Container {
 fn zones(screen: &Screen, armed: Signal<bool>) -> Container {
     let flow = screen.flow;
     let zone_chip = move |label: Signal<String>, kind: Icon, zone: Zone| {
-        chip_button(label)
+        button()
+            .label(label)
             .icon(Some(kind))
+            .size(Size::Sm)
             .active(move || flow.zone.get() == Some(zone))
             .on_click(move || {
                 if armed.get_untracked() {
@@ -462,7 +470,6 @@ fn drawer(screen: &Screen, armed: Signal<bool>) -> Container {
     let sessions = screen.sessions.clone();
     let session = screen.session;
     let power = screen.power;
-    let t = ui();
 
     container()
         .width(fill())
@@ -478,19 +485,10 @@ fn drawer(screen: &Screen, armed: Signal<bool>) -> Container {
                         .width(fill())
                         .layout(Flex::column().spacing(size::S0_5.px()))
                         .children(sessions.iter().enumerate().map(|(index, s)| {
-                            let selected = index == chosen;
-                            let mut line = list::row(s.name.clone())
+                            list::row(s.name.clone())
                                 .icon(Some(Icon::Monitor))
-                                .selected(selected)
-                                .on_click(choose(armed, flow, move || session.set(index)));
-                            if selected {
-                                line = line.trailing(icon(
-                                    Icon::Check,
-                                    icon_box::SMALL.px(),
-                                    t.colors.accent,
-                                ));
-                            }
-                            line
+                                .checked(index == chosen)
+                                .on_click(choose(armed, flow, move || session.set(index)))
                         }))
                 }
                 Zone::Power => container()
@@ -501,8 +499,10 @@ fn drawer(screen: &Screen, armed: Signal<bool>) -> Container {
                             PowerAction::Reboot => Icon::Refresh,
                             PowerAction::PowerOff => Icon::Power,
                         };
-                        chip_button(action.label().to_owned())
+                        button()
+                            .label(action.label().to_owned())
                             .icon(Some(kind))
+                            .size(Size::Sm)
                             .on_click(choose(armed, flow, move || power.request(action)))
                     })),
             }))
@@ -532,7 +532,7 @@ fn guard() -> Container {
                 .width(fill())
                 .height(stroke::BOLD)
                 .corners(radius::pill(stroke::BOLD))
-                .background(t.colors.accent)
+                .background(t.colors.accent.fill)
                 .pivot(Pivot::LEFT)
                 .scale(
                     Scale::new(0.0, 1.0).timeline(
@@ -551,6 +551,9 @@ fn guard() -> Container {
         )
 }
 
+/// Where the battery turns to a warning, then an alert, in percent.
+const BATTERY_LEVELS: (f32, f32) = (30.0, 15.0);
+
 /// The battery as a ring, while there is one, coloured by how much is
 /// left: green on the charger, whatever the battery reports doing.
 pub fn gauge(battery: Signal<Option<Battery>>, size: IconSize) -> Container {
@@ -558,22 +561,26 @@ pub fn gauge(battery: Signal<Option<Battery>>, size: IconSize) -> Container {
     container().child(move || {
         let battery = battery.get()?;
         let percent = f32::from(battery.percent);
-        Some(
-            ring(percent / 100.0)
-                .color(battery_ink(&t.colors, percent, battery.plugged, false))
-                .size(size),
-        )
+        let level = if battery.plugged {
+            Level::Good
+        } else {
+            Level::below(percent, BATTERY_LEVELS.0, BATTERY_LEVELS.1)
+        };
+        // A ring is a fill; normal, it is drawn in the text's colour.
+        let color = level
+            .hue()
+            .map_or(t.colors.text, |hue| t.colors.hue(hue).fill);
+        Some(ring(percent / 100.0).color(color).size(size))
     })
 }
 
 /// A small warning pill, shown while caps lock is on.
 #[component]
 pub fn caps_chip(#[prop(required)] words: String) -> impl Widget {
-    let t = ui();
     // Hidden rather than empty, so it takes no spacing in a row or a column.
     container()
         .visible(move || keyboard_modifiers().get().caps_lock)
-        .child(warning(Icon::CapsLock).child(chip_text(words, t.colors.warning)))
+        .child(warning(Icon::CapsLock).child(chip_text(words, Tone::Warning.ink())))
 }
 
 /// The `pam_faillock` lock, counting down. A warning, never a gate: the field
@@ -600,7 +607,7 @@ pub fn lockout_chip(#[prop(required)] locked: Option<Lock>, long: bool) -> impl 
     let kind = if long { ty::BODY_SMALL } else { CHIP.label() };
     let words = move |words: &str| {
         typed(words.to_owned(), kind.em())
-            .color(t.colors.warning)
+            .color(t.colors.warning.text)
             .nowrap()
     };
     container()
@@ -616,13 +623,21 @@ pub fn lockout_chip(#[prop(required)] locked: Option<Lock>, long: bool) -> impl 
                 Lock::Until(_) => container()
                     .layout(centered_row(size::S1.px()))
                     .child(long.then(|| words("Locked for")))
-                    .child(roll::rolling(left).look(kind.em()).color(t.colors.warning))
+                    .child(
+                        roll::rolling(left)
+                            .look(kind.em())
+                            .color(t.colors.warning.text),
+                    )
                     .into_any(),
             };
             Some(if long {
                 container()
                     .layout(centered_row(size::S2.px()))
-                    .child(icon(Icon::Lock, icon_box::SMALL.px(), t.colors.warning))
+                    .child(icon(
+                        Icon::Lock,
+                        icon_box::SMALL.px(),
+                        t.colors.warning.text,
+                    ))
                     .child(what)
                     .into_any()
             } else {
@@ -634,13 +649,12 @@ pub fn lockout_chip(#[prop(required)] locked: Option<Lock>, long: bool) -> impl 
 /// The warning pills' size: the island's at rest.
 const CHIP: Size = Size::Xxs;
 
-/// A pill tinted with the warning colour, led by `kind`.
-fn warning(kind: Icon) -> Chip {
-    let t = ui();
-    chip()
+/// A tag in the warning's tone, led by `kind`.
+fn warning(kind: Icon) -> Tag {
+    tag()
+        .tone(Tone::Warning)
         .size(CHIP)
-        .fill(t.colors.warning.with_alpha(0.2))
-        .child(icon(kind, CHIP.icon(), t.colors.warning))
+        .child(icon(kind, CHIP.icon(), Tone::Warning.ink()))
 }
 
 fn chip_text<M>(words: impl IntoSignal<String, M>, color: Color) -> Text {

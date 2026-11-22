@@ -73,11 +73,17 @@ timeout_ms = 600
 # dark_flavor = "Storm"
 # light_flavor = "Day"
 # accent = "Blue"
+# Each flavour's own accent, over accent.
+# dark_accent = "Blue"
+# light_accent = "Blue"
 # Or both flavours worked out from one colour, as Material You does...
 # seed = "#6750a4"
 # ...or from the colour that fits a picture best. It is read as the lock
 # starts, so a large picture makes it start later.
 # wallpaper = "~/Pictures/wallpaper.jpg"
+# Which of the colours the picture yields, best first, the flavours are made
+# of: 0, the best; one past the last is the best too.
+# wallpaper_color = 0
 # How a seed or a wallpaper spreads: "tonal-spot", "vibrant", "expressive",
 # "content", "fidelity", "neutral", "monochrome", "rainbow", "fruit-salad";
 # and how far apart its tones are: "standard", "medium", "high".
@@ -102,8 +108,10 @@ motion = "full"
 # mono = "JetBrains Mono"
 
 # Colours set over each flavour, by name: background (the
-# island), text, sub, dim, accent, success, warning, danger, and on_accent,
-# on_success, on_warning, on_danger for what reads on each fill.
+# island), text, sub, dim, accent, success, warning, danger; on_accent,
+# on_success, on_warning, on_danger for what reads on each fill; and
+# accent_text, success_text, warning_text, danger_text for each hue as text on
+# the island, worked out from the fill when unset.
 # [appearance.dark]
 # accent = "#7aa2f7"
 # [appearance.light]
