@@ -2077,7 +2077,7 @@ dependencies = [
 [[package]]
 name = "styletto"
 version = "0.1.0"
-source = "git+https://github.com/MalpenZibo/styletto?branch=main#65707cf34e611f113f35d1c68227eb2a420a1583"
+source = "git+https://github.com/MalpenZibo/styletto?branch=main#6a2c7f4025ca8b2f8ce00f70c3e88330c4b02b4d"
 dependencies = [
  "guido",
  "image",
