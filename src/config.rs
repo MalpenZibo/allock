@@ -519,6 +519,29 @@ mod tests {
         dir
     }
 
+    /// The lock builds its `Ui` once, before it draws: a wallpaper read on
+    /// a thread, as `UiConfig::ui` reads it, would never colour it.
+    #[test]
+    fn a_wallpaper_is_read_before_the_look_is_made() {
+        let dir = scratch("wallpaper");
+        let picture = dir.join("red.png");
+        ::image::RgbaImage::from_pixel(16, 16, ::image::Rgba([200, 30, 40, 255]))
+            .save(&picture)
+            .unwrap();
+        let theme = UiConfig::default().ui(None);
+
+        let mut appearance = UiConfig {
+            wallpaper: Some(picture.display().to_string()),
+            ..UiConfig::default()
+        };
+        // Its colours, at once: not the theme while styletto reads it.
+        assert_ne!(appearance.ui_blocking(None), theme);
+
+        // One that can't be read shows the theme.
+        appearance.wallpaper = Some(dir.join("missing.png").display().to_string());
+        assert_eq!(appearance.ui_blocking(None), theme);
+    }
+
     #[test]
     fn an_imported_appearance_is_read_under_the_keys_set_beside_it() {
         let dir = scratch("import");

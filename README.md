@@ -146,6 +146,7 @@ accent = "Mauve"
 
 The accents are the flavour's own colour names, like `Blue`, `Green` or
 `Magenta` for Tokyo Night; a name the flavour lacks is reported in the log.
+`dark_accent` and `light_accent` give each flavour its own, over `accent`.
 
 Or both flavours worked out from a **seed** colour, as Material You does, or
 from the colour that fits a **wallpaper** best (read as the lock starts, so a
@@ -157,6 +158,7 @@ seed = "#6750a4"                  # or: wallpaper = "~/Pictures/wallpaper.jpg"
 variant = "tonal-spot"            # tonal-spot | vibrant | expressive | content |
                                   # fidelity | neutral | monochrome | rainbow | fruit-salad
 contrast = "standard"             # standard | medium | high
+wallpaper_color = 0               # which of the picture's colours, best first
 ```
 
 A wallpaper wins over a seed, and either wins over a theme. The greeter runs as
@@ -179,9 +181,11 @@ mono = "JetBrains Mono"
 ```
 
 Any colour can be set over a flavour, by name: `background` (the island),
-`text`, `sub`, `dim`, `accent`, `success`, `warning`, `danger`, and
+`text`, `sub`, `dim`, `accent`, `success`, `warning`, `danger`,
 `on_accent`, `on_success`, `on_warning`, `on_danger` for what reads on each
-fill, as `#rrggbb` or `#rrggbbaa`:
+fill, and `accent_text`, `success_text`, `warning_text`, `danger_text` for each
+hue as text on the island (worked out from the fill, so it reads, when unset),
+as `#rrggbb` or `#rrggbbaa`:
 
 ```toml
 [appearance.dark]
