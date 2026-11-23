@@ -132,7 +132,11 @@ fn screen(config: Rc<Config>, mode: Mode, auth: Auth, flow: Flow) -> Screen {
     );
     let time_format = config.clock.time_format.clone();
     Screen {
-        ui: config::look(&config.appearance),
+        // A lock comes up before it could ask the desktop which side it
+        // prefers: `mode = "auto"` shows the dark one. A wallpaper is read
+        // here, before anything shows, so the island never changes colour on
+        // its way in.
+        ui: config.appearance.ui_blocking(None),
         wallpaper: config.background.resolved_path().map(Rc::from),
         time: create_memo(move || now.get().format(&time_format).to_string()),
         now,

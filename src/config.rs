@@ -27,28 +27,6 @@ pub struct Config {
     pub handoff: HandoffConfig,
 }
 
-/// The look `[appearance]` asks for. A lock comes up before it could ask the
-/// desktop which side it prefers: `mode = "auto"` shows the dark one.
-///
-/// A wallpaper is read here, before anything shows. styletto would read it on
-/// a thread and show the theme meanwhile, and the island would change colour
-/// as it comes up. One that can't be read is reported, and the seed, or the
-/// theme, shows instead.
-pub fn look(appearance: &UiConfig) -> styletto::Ui {
-    let Some(path) = appearance.wallpaper_path() else {
-        return appearance.ui(None);
-    };
-    match styletto::theme::material::seeds(&path) {
-        Ok(colors) => appearance.with_wallpaper_colors(&colors).ui(None),
-        Err(err) => {
-            log::warn!("appearance.wallpaper {}: {err}", path.display());
-            let mut appearance = appearance.clone();
-            appearance.wallpaper = None;
-            appearance.ui(None)
-        }
-    }
-}
-
 /// Which outputs something is drawn on.
 #[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub enum Outputs {
@@ -541,6 +519,8 @@ mod tests {
         dir
     }
 
+    /// The lock builds its `Ui` once, before it draws: a wallpaper read on
+    /// a thread, as `UiConfig::ui` reads it, would never colour it.
     #[test]
     fn a_wallpaper_is_read_before_the_look_is_made() {
         let dir = scratch("wallpaper");
@@ -555,11 +535,11 @@ mod tests {
             ..UiConfig::default()
         };
         // Its colours, at once: not the theme while styletto reads it.
-        assert_ne!(look(&appearance), theme);
+        assert_ne!(appearance.ui_blocking(None), theme);
 
         // One that can't be read shows the theme.
         appearance.wallpaper = Some(dir.join("missing.png").display().to_string());
-        assert_eq!(look(&appearance), theme);
+        assert_eq!(appearance.ui_blocking(None), theme);
     }
 
     #[test]
